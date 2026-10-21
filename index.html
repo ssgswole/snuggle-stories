@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Make a brand-new, kid-safe short story and listen to it read aloud. Free, private, works offline.">
+  <meta name="theme-color" content="#ffb84d">
+  <title>Snuggle Stories · Audiobook Story Maker for Kids</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Snuggle Stories">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="sky" aria-hidden="true"><span>⭐</span><span>☁️</span><span>✨</span><span>🌈</span><span>☁️</span><span>⭐</span></div>
+
+  <header class="hero">
+    <div class="logo" aria-hidden="true">📖</div>
+    <h1>Snuggle Stories</h1>
+    <p class="tagline">Make a brand-new story, then snuggle up and listen together.</p>
+  </header>
+
+  <main>
+    <form id="story-form" class="card maker" autocomplete="off">
+      <h2 class="step"><span class="step-num">1</span> Make a story</h2>
+
+      <div class="field">
+        <label for="child-name" class="field-label">Who is the hero? <small>(optional)</small></label>
+        <input id="child-name" type="text" maxlength="24" placeholder="Type a name, or leave empty for a surprise" spellcheck="false">
+      </div>
+
+      <fieldset class="field">
+        <legend class="field-label">The hero is…</legend>
+        <div class="chips">
+          <label class="chip"><input type="radio" name="pronoun" value="she" checked><span>👧 she / her</span></label>
+          <label class="chip"><input type="radio" name="pronoun" value="he"><span>👦 he / him</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend class="field-label">Age</legend>
+        <div class="chips">
+          <label class="chip"><input type="radio" name="age" value="0"><span>🧸 3–5</span></label>
+          <label class="chip"><input type="radio" name="age" value="1" checked><span>🎈 6–8</span></label>
+          <label class="chip"><input type="radio" name="age" value="2"><span>📚 9–11</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend class="field-label">Pick a world</legend>
+        <div id="theme-grid" class="theme-grid"></div>
+      </fieldset>
+
+      <div class="two-col">
+        <fieldset class="field">
+          <legend class="field-label">Mood</legend>
+          <div class="chips">
+            <label class="chip"><input type="radio" name="mood" value="calm" checked><span>😌 Calm</span></label>
+            <label class="chip"><input type="radio" name="mood" value="funny"><span>😂 Funny</span></label>
+            <label class="chip"><input type="radio" name="mood" value="brave"><span>🦁 Brave</span></label>
+          </div>
+        </fieldset>
+        <fieldset class="field">
+          <legend class="field-label">Length</legend>
+          <div class="chips">
+            <label class="chip"><input type="radio" name="length" value="short" checked><span>⏱️ Short <small>~2–3 min</small></span></label>
+            <label class="chip"><input type="radio" name="length" value="medium"><span>🕰️ Longer <small>~3–4 min</small></span></label>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn btn-big btn-primary">✨ Make my story</button>
+        <button type="button" id="surprise" class="btn btn-big btn-soft">🎲 Surprise me!</button>
+      </div>
+    </form>
+
+    <p id="empty-state" class="empty">Your story will appear here. 🌟</p>
+
+    <section id="listen" class="listen" hidden aria-live="polite">
+      <h2 class="step"><span class="step-num">2</span> Listen</h2>
+
+      <div class="player card" role="group" aria-label="Story player">
+        <div class="player-main">
+          <button type="button" id="play" class="btn btn-big btn-play">🎧 Listen</button>
+          <button type="button" id="stop" class="btn btn-icon" aria-label="Stop" title="Stop" disabled>⏹️ <span class="lbl">Stop</span></button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+        <p id="no-tts" class="warn" hidden>😕 This browser can't read aloud. Try Chrome, Edge, or Safari. You can still read the story together!</p>
+
+        <details class="voice-settings">
+          <summary>🎙️ Voice settings</summary>
+          <div class="settings-grid">
+            <div class="field" id="voice-field" hidden>
+              <label for="voice" class="field-label small">Voice</label>
+              <div class="row">
+                <select id="voice"></select>
+                <button type="button" id="test-voice" class="btn btn-small">🔈 Test</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="rate" class="field-label small">Speed <output id="rate-val"></output></label>
+              <input type="range" id="rate" min="0.6" max="1.3" step="0.05" value="0.9">
+            </div>
+            <div class="field">
+              <label for="pitch" class="field-label small">Pitch <output id="pitch-val"></output></label>
+              <input type="range" id="pitch" min="0.7" max="1.5" step="0.05" value="1.05">
+            </div>
+            <label class="check"><input type="checkbox" id="follow" checked> Follow along (scroll to the part being read)</label>
+            <button type="button" id="reset-voice" class="btn btn-small btn-ghost">↺ Reset speed &amp; pitch</button>
+          </div>
+        </details>
+
+        <div class="extras">
+          <button type="button" id="again" class="btn btn-small">🔄 New story</button>
+          <button type="button" id="download" class="btn btn-small">💾 Save as text</button>
+          <button type="button" id="print" class="btn btn-small">🖨️ Print</button>
+        </div>
+      </div>
+
+      <article id="story" class="card book"></article>
+    </section>
+  </main>
+
+  <div id="mini" class="mini" hidden role="group" aria-label="Quick controls">
+    <span class="mini-label" id="mini-label">🎧 Reading…</span>
+    <button type="button" id="mini-play" class="btn">⏸️ Pause</button>
+    <button type="button" id="mini-stop" class="btn" aria-label="Stop">⏹️</button>
+  </div>
+
+  <div id="install-bar" class="install-bar" hidden role="region" aria-label="Install app">
+    <button type="button" id="install-btn" class="btn btn-small btn-primary" hidden>📲 Install app</button>
+    <p id="ios-tip" class="install-tip" hidden>📲 To install: tap <strong>Share</strong> <span aria-hidden="true">⬆️</span> then <strong>Add to Home Screen</strong>.</p>
+    <button type="button" id="install-close" class="btn btn-icon btn-ghost" aria-label="Hide install tip" title="Hide">✕</button>
+  </div>
+
+  <footer class="foot">
+    <p>🔒 No accounts, no ads, no tracking. Stories are made right here on your device and never sent anywhere.</p>
+  </footer>
+
+  <script src="native-shim.js"></script>
+  <script src="app.js"></script>
+  <script src="pwa.js"></script>
+</body>
+</html>
