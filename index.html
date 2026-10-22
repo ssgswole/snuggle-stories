@@ -53,6 +53,7 @@
       <fieldset class="field">
         <legend class="field-label">Pick a world</legend>
         <div id="theme-grid" class="theme-grid"></div>
+        <p class="unlock-hint"><button type="button" id="unlock-open" class="linkish">🔒 More worlds &amp; longer stories: see the full version</button></p>
       </fieldset>
 
       <div class="two-col">
@@ -68,7 +69,7 @@
           <legend class="field-label">Length</legend>
           <div class="chips">
             <label class="chip"><input type="radio" name="length" value="short" checked><span>⏱️ Short <small>~2–3 min</small></span></label>
-            <label class="chip"><input type="radio" name="length" value="medium"><span>🕰️ Longer <small>~3–4 min</small></span></label>
+            <label class="chip"><input type="radio" name="length" value="medium"><span>🕰️ Longer <small>~3–4 min</small><i class="mini-lock" aria-hidden="true">🔒</i></span></label>
           </div>
         </fieldset>
       </div>
@@ -140,9 +141,69 @@
 
   <footer class="foot">
     <p>🔒 No accounts, no ads, no tracking. Stories are made right here on your device and never sent anywhere.</p>
+    <p><button type="button" id="grownups-btn" class="linkish">👪 Grown-ups: unlock or restore purchase</button></p>
   </footer>
 
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <section id="upsell" class="modal card" role="dialog" aria-modal="true" aria-labelledby="upsell-title" hidden>
+      <button type="button" class="modal-x btn btn-icon btn-ghost" data-close aria-label="Close">✕</button>
+      <div id="upsell-emoji" class="modal-emoji" aria-hidden="true">✨</div>
+      <h2 id="upsell-title" class="modal-title">More worlds are waiting!</h2>
+      <p class="modal-lead">This is part of the full Snuggle Stories. Ask a grown-up to have a look.</p>
+      <ul class="perks">
+        <li>🗺️ All 8 story worlds: Adventure, Friendship, Space, Under the Sea, Dinosaurs and Magic Forest join Bedtime and Animals</li>
+        <li>🕰️ Longer stories (~3–4 minutes)</li>
+        <li>♾️ Unlimited new stories in every world</li>
+        <li>💛 One payment of <strong id="upsell-price">$4.99</strong>. No subscription, no ads, ever.</li>
+      </ul>
+      <div class="modal-actions">
+        <button type="button" id="upsell-ask" class="btn btn-big btn-primary" data-autofocus>👪 I'm a grown-up</button>
+        <button type="button" class="btn btn-big btn-soft" data-close>🌙 Back to free stories</button>
+      </div>
+      <p class="modal-small"><button type="button" id="upsell-restore" class="linkish">Already bought it? Restore purchase</button></p>
+      <p id="upsell-msg" class="modal-msg" role="status"></p>
+    </section>
+
+    <section id="gate" class="modal card" role="dialog" aria-modal="true" aria-labelledby="gate-title" hidden>
+      <button type="button" class="modal-x btn btn-icon btn-ghost" data-close aria-label="Close">✕</button>
+      <div class="modal-emoji" aria-hidden="true">🔐</div>
+      <h2 id="gate-title" class="modal-title">Grown-ups only</h2>
+      <p class="modal-lead"><span id="gate-purpose">Grown-up settings</span>. To continue, type this number using digits:</p>
+      <p class="gate-words" id="gate-words" aria-live="polite">forty-seven</p>
+      <form id="gate-form" class="gate-form" autocomplete="off" novalidate>
+        <label for="gate-input" class="sr-only">The number in digits</label>
+        <input id="gate-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="e.g. 47" data-autofocus>
+        <button type="submit" class="btn btn-big btn-primary">Continue</button>
+      </form>
+      <p id="gate-msg" class="modal-msg" role="alert"></p>
+      <p class="modal-small"><button type="button" id="gate-new" class="linkish">Show a different number</button> · <button type="button" class="linkish" data-close>Cancel</button></p>
+    </section>
+
+    <section id="grownups" class="modal card" role="dialog" aria-modal="true" aria-labelledby="gp-title" hidden>
+      <button type="button" class="modal-x btn btn-icon btn-ghost" data-close aria-label="Close">✕</button>
+      <div class="modal-emoji" aria-hidden="true">👪</div>
+      <h2 id="gp-title" class="modal-title">For grown-ups</h2>
+      <p class="modal-lead">Bedtime and Animals are free forever, with unlimited stories. <strong>Unlock all worlds</strong> is a single one-time purchase that adds 6 more worlds and longer stories.</p>
+      <p id="grownups-status" class="modal-msg"></p>
+      <div class="modal-actions">
+        <button type="button" id="gp-buy" class="btn btn-primary">✨ Unlock all worlds</button>
+        <button type="button" id="gp-restore" class="btn">↩️ Restore purchase</button>
+      </div>
+      <p class="modal-small">🔒 No ads, no tracking, no accounts. Stories are made on this device.</p>
+      <div class="modal-actions"><button type="button" class="btn btn-soft" data-close>Done</button></div>
+    </section>
+
+    <section id="info" class="modal card" role="dialog" aria-modal="true" aria-labelledby="info-title" hidden>
+      <div id="info-emoji" class="modal-emoji" aria-hidden="true">📱</div>
+      <h2 id="info-title" class="modal-title"></h2>
+      <p id="info-body" class="modal-lead"></p>
+      <div class="modal-actions"><button type="button" class="btn btn-big btn-soft" data-close data-autofocus>OK</button></div>
+    </section>
+  </div>
+
+
   <script src="native-shim.js"></script>
+  <script src="unlock.js"></script>
   <script src="app.js"></script>
   <script src="pwa.js"></script>
 </body>

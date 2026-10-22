@@ -911,21 +911,182 @@
     if (el) el.checked = true;
   }
 
+  /* ---------------- Free vs. "Unlock all worlds" ---------------- */
+  var FREE_THEMES = ["bedtime", "animals"];   // always free, unlimited stories
+  var FREE_LENGTHS = ["short"];               // "Longer" stories are part of the unlock
+  var U = window.unlock || { isUnlocked: function () { return false; }, mode: function () { return "web"; },
+    onChange: function () {}, buy: function () { return Promise.resolve({ ok: false, web: true }); },
+    restore: function () { return Promise.resolve({ ok: false, web: true }); }, price: function () { return "$4.99"; },
+    isDevUnlock: function () { return false; } };
+  function isThemeFree(k) { return U.isUnlocked() || FREE_THEMES.indexOf(k) >= 0; }
+  function isLengthFree(v) { return U.isUnlocked() || FREE_LENGTHS.indexOf(v) >= 0; }
+
   function buildThemeGrid() {
     var grid = $("#theme-grid");
     Object.keys(THEMES).forEach(function (k, i) {
       var t = THEMES[k];
       var label = document.createElement("label");
       label.className = "theme-card theme-" + k;
+      label.setAttribute("data-theme", k);
       label.innerHTML = '<input type="radio" name="theme" value="' + k + '"' + (i === 0 ? " checked" : "") + ">" +
-        '<span class="theme-emoji" aria-hidden="true">' + t.emoji + '</span><span class="theme-name">' + t.label + "</span>";
+        '<span class="theme-emoji" aria-hidden="true">' + t.emoji + '</span><span class="theme-name">' + t.label + "</span>" +
+        '<span class="lock-badge" aria-hidden="true">🔒</span><span class="free-badge">Free</span>';
+      label.addEventListener("click", function (e) {
+        if (isThemeFree(k)) return;
+        e.preventDefault();
+        openUpsell({ theme: k });
+      });
       grid.appendChild(label);
     });
   }
 
+  function applyLocks() {
+    var on = U.isUnlocked();
+    document.documentElement.classList.toggle("is-unlocked", on);
+    Array.prototype.forEach.call(document.querySelectorAll(".theme-card"), function (card) {
+      var k = card.getAttribute("data-theme"), locked = !isThemeFree(k);
+      card.classList.toggle("locked", locked);
+      card.classList.toggle("is-free", !on && FREE_THEMES.indexOf(k) >= 0);
+      var input = card.querySelector("input");
+      input.setAttribute("aria-label", THEMES[k].label + (locked ? " (part of the full version)" : ""));
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="length"]'), function (input) {
+      var chip = input.closest(".chip"), locked = !isLengthFree(input.value);
+      chip.classList.toggle("locked", locked);
+    });
+    if (!isThemeFree(radio("theme"))) setRadio("theme", FREE_THEMES[0]);
+    if (!isLengthFree(radio("length"))) setRadio("length", FREE_LENGTHS[0]);
+    var gp = $("#grownups-status");
+    if (gp) gp.textContent = on ? (U.isDevUnlock() ? "🛠️ Developer preview: everything is unlocked on this device (?devunlock=0 to lock again)."
+      : "🎉 Everything is unlocked. Thank you for supporting Snuggle Stories!") : "";
+    var ub = $("#unlock-open"); if (ub) ub.hidden = on;
+  }
+
+  /* Upsell (kid-facing, calm) -> parent gate -> buy / restore / store info */
+  var lastFocus = null;
+  function showModal(id) {
+    Array.prototype.forEach.call(document.querySelectorAll(".modal"), function (m) { m.hidden = m.id !== id; });
+    var back = $("#modal-backdrop");
+    if (back.hidden) lastFocus = document.activeElement;
+    back.hidden = false;
+    document.body.classList.add("modal-open");
+    var m = $("#" + id), f = m.querySelector("[data-autofocus]") || m.querySelector("button, input");
+    if (f) setTimeout(function () { f.focus(); }, 30);
+  }
+  function closeModal() {
+    $("#modal-backdrop").hidden = true;
+    document.body.classList.remove("modal-open");
+    if (lastFocus && lastFocus.focus) try { lastFocus.focus(); } catch (e) {}
+    lastFocus = null;
+  }
+
+  function openUpsell(ctx) {
+    ctx = ctx || {};
+    var t = ctx.theme && THEMES[ctx.theme];
+    $("#upsell-emoji").textContent = t ? t.emoji : "✨";
+    $("#upsell-title").textContent = t ? ("The " + t.label + " world is waiting!") : (ctx.length ? "Longer stories are waiting!" : "Unlock all the worlds!");
+    $("#upsell-price").textContent = U.price();
+    $("#upsell-msg").textContent = "";
+    showModal("upsell");
+  }
+
+  /* Parent gate: type a spelled-out number as digits. Can't be passed by tapping around. */
+  var ONES = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+  var TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+  function spell(n) { return TENS[Math.floor(n / 10)] + (n % 10 ? "-" + ONES[n % 10] : ""); }
+  var gate = { answer: 0, then: null, tries: 0 };
+  function newGateNumber() {
+    var n; do { n = 21 + Math.floor(Math.random() * 79); } while (n % 10 === 0 || n === gate.answer);
+    gate.answer = n;
+    $("#gate-words").textContent = spell(n);
+    $("#gate-input").value = "";
+    $("#gate-msg").textContent = "";
+  }
+  function parentGate(purpose, then) {
+    gate.then = then; gate.tries = 0;
+    $("#gate-purpose").textContent = purpose;
+    newGateNumber();
+    showModal("gate");
+  }
+  function submitGate(e) {
+    if (e) e.preventDefault();
+    var v = $("#gate-input").value.replace(/\s+/g, "");
+    if (/^\d{1,3}$/.test(v) && +v === gate.answer) {
+      var then = gate.then; gate.then = null;
+      if (then) then(); else closeModal();
+      return;
+    }
+    gate.tries++;
+    if (gate.tries >= 3) { newGateNumber(); gate.tries = 0; $("#gate-msg").textContent = "Let's try a new number."; }
+    else { $("#gate-input").value = ""; $("#gate-msg").textContent = "Not quite. Please type the number using digits, like 47."; }
+    $("#gate-input").focus();
+  }
+
+  function showInfo(emoji, title, body) {
+    $("#info-emoji").textContent = emoji;
+    $("#info-title").textContent = title;
+    $("#info-body").textContent = body;
+    showModal("info");
+  }
+  function webInfo() {
+    showInfo("📱", "The full version lives in the apps",
+      "This web version includes the Bedtime and Animals worlds for free, with as many stories as you like. " +
+      "To unlock every world and longer stories, get Snuggle Stories from the App Store or Google Play and choose " +
+      "\"Unlock all worlds\" there (" + U.price() + ", one time, no subscription, no ads).");
+  }
+  function doBuy() {
+    if (U.mode() !== "native") { webInfo(); return; }
+    showInfo("⏳", "Opening the store…", "Follow the steps from the App Store or Google Play.");
+    U.buy().then(function (r) {
+      if (r.ok) { applyLocks(); showInfo("🎉", "All worlds unlocked!", "Thank you! Every world and longer stories are ready. Sweet dreams!"); }
+      else if (r.web) webInfo();
+      else if (r.cancelled) closeModal();
+      else showInfo("😕", "That didn't go through", r.message || "Please try again later. You were not charged.");
+    });
+  }
+  function doRestore() {
+    if (U.mode() !== "native") {
+      showInfo("📱", "Restore in the app", "Purchases are restored inside the App Store or Google Play version of Snuggle Stories. The web version has nothing to restore.");
+      return;
+    }
+    showInfo("⏳", "Checking your purchases…", "This takes a moment.");
+    U.restore().then(function (r) {
+      applyLocks();
+      if (U.isUnlocked()) showInfo("🎉", "Purchase restored!", "Every world and longer stories are unlocked again.");
+      else showInfo("🔎", "No purchase found", r.message || "We couldn't find \"Unlock all worlds\" on this store account. Make sure you're signed in with the account that bought it.");
+    });
+  }
+
+  function initUnlock() {
+    applyLocks();
+    U.onChange(applyLocks);
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="length"]'), function (input) {
+      input.closest(".chip").addEventListener("click", function (e) {
+        if (isLengthFree(input.value)) return;
+        e.preventDefault();
+        openUpsell({ length: input.value });
+      });
+    });
+    $("#upsell-ask").addEventListener("click", function () {
+      parentGate("Unlock all worlds for " + U.price(), doBuy);
+    });
+    $("#upsell-restore").addEventListener("click", function () { parentGate("Restore a purchase", doRestore); });
+    $("#grownups-btn").addEventListener("click", function () {
+      parentGate("Grown-up settings", function () { applyLocks(); showModal("grownups"); });
+    });
+    $("#unlock-open").addEventListener("click", function () { openUpsell({}); });
+    $("#gp-buy").addEventListener("click", doBuy);
+    $("#gp-restore").addEventListener("click", doRestore);
+    $("#gate-form").addEventListener("submit", submitGate);
+    $("#gate-new").addEventListener("click", newGateNumber);
+    Array.prototype.forEach.call(document.querySelectorAll("[data-close]"), function (b) { b.addEventListener("click", closeModal); });
+    $("#modal-backdrop").addEventListener("click", function (e) { if (e.target === this) closeModal(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("#modal-backdrop").hidden) closeModal(); });
+  }
+
   function makeStory(surprise) {
     if (surprise) {
-      var keys = Object.keys(THEMES);
+      var keys = Object.keys(THEMES).filter(isThemeFree);
       setRadio("theme", keys[Math.floor(Math.random() * keys.length)]);
       setRadio("mood", ["calm", "funny", "brave"][Math.floor(Math.random() * 3)]);
     }
@@ -934,6 +1095,8 @@
       name: $("#child-name").value, pronoun: radio("pronoun"), age: +radio("age"),
       theme: radio("theme"), mood: radio("mood"), length: radio("length")
     };
+    if (!isThemeFree(opts.theme)) opts.theme = FREE_THEMES[0];   // never generate locked content
+    if (!isLengthFree(opts.length)) opts.length = FREE_LENGTHS[0];
     prefs.form = opts; savePrefs();
     current = generateStory(opts);
     renderStory(current);
@@ -1119,6 +1282,7 @@
       setRadio("pronoun", f.pronoun === "they" ? "she" : f.pronoun); setRadio("age", f.age); setRadio("theme", f.theme);
       setRadio("mood", f.mood); setRadio("length", f.length);
     }
+    initUnlock();
     if (prefs.rate) $("#rate").value = prefs.rate;
     if (prefs.pitch) $("#pitch").value = prefs.pitch;
     var showVals = function () {
