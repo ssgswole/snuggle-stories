@@ -12,7 +12,9 @@
   if (!TTS) return;
   var platform = Cap.getPlatform ? Cap.getPlatform() : "";
 
-  var voices = [], listeners = {}, current = null;
+  var voices = [], pvVoices = [], listeners = {}, current = null;
+  // Apple Personal Voice (iPhone/iPad, iOS 17+): local plugin in ios/App/App/PersonalVoicePlugin.swift.
+  var PV = platform === "ios" && Cap.registerPlugin ? Cap.registerPlugin("PersonalVoice") : null;
   function emit(type) {
     var ev = { type: type };
     (listeners[type] || []).forEach(function (fn) { try { fn(ev); } catch (e) {} });
@@ -50,12 +52,29 @@
 
   var synth = {
     speaking: false, pending: false, paused: false, onvoiceschanged: null,
-    getVoices: function () { return voices.slice(); },
+    getVoices: function () { return voices.concat(pvVoices); },
     addEventListener: function (t, fn) { (listeners[t] = listeners[t] || []).push(fn); },
     removeEventListener: function (t, fn) { listeners[t] = (listeners[t] || []).filter(function (f) { return f !== fn; }); },
     speak: function (u) {
       kill("interrupted");   // the plugin's speak() flushes the native queue itself (QUEUE_FLUSH)
       var mine = current = { u: u, dead: false };
+      var done = function () {
+        if (mine.dead) return;
+        mine.dead = true; current = null; synth.speaking = false;
+        if (typeof u.onend === "function") u.onend({ utterance: u });
+      };
+      var fail = function (err) {
+        if (mine.dead) return;
+        mine.dead = true; current = null; synth.speaking = false;
+        if (typeof u.onerror === "function") u.onerror({ utterance: u, error: "synthesis-failed", message: String(err) });
+      };
+      if (u.voice && u.voice.personal && PV) {          // grown-up's own Personal Voice
+        synth.speaking = true;
+        if (typeof u.onstart === "function") u.onstart({ utterance: u });
+        var r = +u.rate || 1; if (r < 1) r = 1 - (1 - r) * 0.8;
+        PV.speak({ text: u.text, voiceId: u.voice.personalId, rate: r, pitch: +u.pitch || 1 }).then(done, fail);
+        return;
+      }
       var idx = voiceIndex(u.voice);
       var opts = { text: u.text, lang: (u.voice && u.voice.lang) || u.lang || "en-US",
         rate: nativeRate(u.rate), pitch: Math.min(1.5, Math.max(0.7, +u.pitch || 1)),
@@ -63,19 +82,12 @@
       if (idx >= 0) opts.voice = idx;
       synth.speaking = true;
       if (typeof u.onstart === "function") u.onstart({ utterance: u });
-      TTS.speak(opts).then(function () {
-        if (mine.dead) return;
-        mine.dead = true; current = null; synth.speaking = false;
-        if (typeof u.onend === "function") u.onend({ utterance: u });
-      }, function (err) {
-        if (mine.dead) return;
-        mine.dead = true; current = null; synth.speaking = false;
-        if (typeof u.onerror === "function") u.onerror({ utterance: u, error: "synthesis-failed", message: String(err) });
-      });
+      TTS.speak(opts).then(done, fail);
     },
     cancel: function () {
       kill("interrupted");
       TTS.stop().catch(function () {});   // always: also silences anything the engine still has queued
+      if (PV) PV.stop().catch(function () {});
     },
     pause: function () { synth.cancel(); }, resume: function () {}
   };
@@ -94,4 +106,25 @@
     }).catch(function () { if (++tries < 6) setTimeout(fetchVoices, 600 * tries); });
   }
   fetchVoices();
+
+  /* Personal Voice: listed as "My Personal Voice" once the grown-up allows it. app.js shows it only
+     with the full version and offers the request button (behind the grown-up check). */
+  function setPersonal(res) {
+    var list = (res && res.status === "authorized" && res.voices) || [];
+    pvVoices = list.map(function (v) {
+      return { name: "My Personal Voice" + (v.name ? " (" + v.name + ")" : ""), lang: v.lang || "en-US",
+        voiceURI: "personal:" + v.id, personalId: v.id, personal: true, localService: true, "default": false };
+    });
+    emit("voiceschanged");
+    return { status: (res && res.status) || "unsupported", count: pvVoices.length };
+  }
+  window.SnugglePersonalVoice = PV ? {
+    available: true,
+    status: function () { return PV.getStatus().then(setPersonal, function () { return { status: "unsupported", count: 0 }; }); },
+    request: function () { return PV.requestAuthorization().then(setPersonal, function () { return { status: "unsupported", count: 0 }; }); }
+  } : { available: false };
+  if (PV) {
+    window.SnugglePersonalVoice.status();
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) window.SnugglePersonalVoice.status(); }); // back from Settings
+  }
 })();

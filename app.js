@@ -984,7 +984,9 @@
     ctx = ctx || {};
     var t = ctx.theme && THEMES[ctx.theme];
     $("#upsell-emoji").textContent = t ? t.emoji : "✨";
-    $("#upsell-title").textContent = t ? ("The " + t.label + " world is waiting!") : (ctx.length ? "Longer stories are waiting!" : "Unlock all the worlds!");
+    $("#upsell-title").textContent = t ? ("The " + t.label + " world is waiting!") : ctx.length ? "Longer stories are waiting!"
+      : ctx.feature === "record" ? "Read stories in your own voice!" : ctx.feature === "voice" ? "Hear stories in your grown-up's voice!" : "Unlock all the worlds!";
+    if (ctx.feature) $("#upsell-emoji").textContent = "🎙️";
     $("#upsell-price").textContent = U.price();
     $("#upsell-msg").textContent = "";
     showModal("upsell");
@@ -1191,7 +1193,7 @@
 
   function addSegment(el, text, kind, gapAfter) {
     // kind "para": wrap each sentence in a span for sentence-level highlighting.
-    var si = segments.length, seg = { el: el, items: [] };
+    var si = segments.length, seg = { el: el, items: [], kind: kind };
     segments.push(seg);
     if (kind === "para") {
       el.textContent = "";
@@ -1236,6 +1238,7 @@
 
   // Quality only (0–60). >= 40 counts as "natural sounding".
   function voiceQuality(v) {
+    if (v.personal) return 70;                                 // the grown-up's own Apple Personal Voice
     var n = (v.name || "") + " " + (v.voiceURI || "");
     if (/premium/i.test(n)) return 60;
     if (/natural|neural|wavenet|studio|journey/i.test(n)) return 58;
@@ -1265,11 +1268,14 @@
     if (!synth) return;
     var all = synth.getVoices() || [];
     if (!all.length) return;
+    var personal = all.filter(function (v) { return v.personal; });
+    all = all.filter(function (v) { return !v.personal; });
     var en = all.filter(function (v) { return /^en/i.test(v.lang || ""); });
     var pool = (en.length ? en : all).filter(function (v) { return !isNovelty(v); });
     if (!pool.length) pool = en.length ? en : all;
+    if (U.isUnlocked()) pool = personal.concat(pool);           // Personal Voice is part of the full version
     voices = pool.slice().sort(function (a, b) { return scoreVoice(b) - scoreVoice(a) || (a.name || "").localeCompare(b.name || ""); });
-    var sel = $("#voice"), keep = sel.value || prefs.voice;
+    var sel = $("#voice");
     sel.innerHTML = "";
     var groups = [["✨ Most natural", voices.filter(function (v) { return voiceQuality(v) >= 40; })],
                   ["Other voices", voices.filter(function (v) { return voiceQuality(v) < 40; })]];
@@ -1284,8 +1290,8 @@
         parent.appendChild(o);
       });
     });
-    var pick = prefs.voice && voices.some(function (v) { return voiceKey(v) === prefs.voice; }) ? prefs.voice
-      : keep && voices.some(function (v) { return voiceKey(v) === keep; }) ? keep : voiceKey(voices[0]);
+    // A grown-up's explicit choice wins; otherwise always the best-ranked voice (re-ranked as voices arrive).
+    var pick = prefs.voice && voices.some(function (v) { return voiceKey(v) === prefs.voice; }) ? prefs.voice : voiceKey(voices[0]);
     sel.value = pick;
     $("#voice-field").hidden = voices.length < 2;
     updateVoiceTip();
@@ -1324,6 +1330,30 @@
       $("#voice-tip-text").textContent = voiceHelpText();
       tip.hidden = !(basic && voices.length) || !!prefs.voiceTipClosed;
     }
+  }
+
+  /* ---------------- Apple Personal Voice (iPhone app only, full version) ---------------- */
+  var PVS = window.SnugglePersonalVoice || { available: false };
+  function pvMessage(r) {
+    if (!r) return "";
+    if (r.status === "authorized" && r.count) return "💛 Your Personal Voice is ready. Pick “My Personal Voice” in the Voice list above.";
+    if (r.status === "authorized") return "Allowed, but no Personal Voice was found. Create one in Settings › Accessibility › Personal Voice, then come back.";
+    if (r.status === "denied") return "Not allowed yet. In Settings › Accessibility › Personal Voice, turn on “Allow Apps to Request to Use”, then try again.";
+    if (r.status === "unsupported") return "Personal Voice needs an iPhone or iPad with iOS 17 or later.";
+    return "";
+  }
+  function initPersonalVoice() {
+    var box = $("#pv-box"); if (!box) return;
+    box.hidden = !PVS.available;
+    if (!PVS.available) return;
+    $("#pv-btn").addEventListener("click", function () {
+      if (!U.isUnlocked()) { openUpsell({ feature: "voice" }); return; }
+      parentGate("Use my Personal Voice", function () {
+        closeModal();
+        $("#pv-msg").textContent = "Asking your iPhone…";
+        PVS.request().then(function (r) { $("#pv-msg").textContent = pvMessage(r); loadVoices(); });
+      });
+    });
   }
 
   /* ---------------- Rate / pitch ---------------- */
@@ -1451,6 +1481,24 @@
   }
 
   function restartIfPlaying() { if (state === "playing") speakFrom(pos); }
+  // Small API for recorder.js ("Record yourself reading").
+  root.SnuggleApp = {
+    story: function () { return current; },
+    script: function () {   // every line the narrator reads, in order, with its display text
+      return queue.map(function (it) {
+        var sg = segments[it.seg];
+        return { text: it.span ? it.span.textContent.trim() : sg.el.textContent.trim(), kind: sg.kind, seg: it.seg };
+      });
+    },
+    isUnlocked: function () { return U.isUnlocked(); },
+    onUnlockChange: function (fn) { U.onChange(fn); },
+    openUpsell: function (ctx) { openUpsell(ctx); },
+    parentGate: function (purpose, then) { parentGate(purpose, then); },
+    closeModal: function () { closeModal(); },
+    stopSpeech: function () { stopSpeech(); },
+    clean: function (t) { return speakable(t); }
+  };
+
   root.SnuggleSpeech = { splitDisplay: splitDisplay, speakable: speakable, voiceQuality: voiceQuality,   // for tests
     effectiveRate: effectiveRate, state: function () { return { state: state, pos: pos, queue: queue.length }; } };
 
@@ -1486,6 +1534,8 @@
       setRadio("mood", f.mood); setRadio("length", f.length);
     }
     initUnlock();
+    initPersonalVoice();
+    U.onChange(function () { if (synth) loadVoices(); });
     // Voice update v2: old saved voice/pitch came from the previous (sometimes robotic) auto-pick. Start fresh once.
     if (prefs.voiceVer !== 2) {
       delete prefs.voice; if (prefs.pitch == 1.05) delete prefs.pitch;

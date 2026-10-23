@@ -22,6 +22,7 @@
     <div class="logo" aria-hidden="true">📖</div>
     <h1>Snuggle Stories</h1>
     <p class="tagline">Make a brand-new story, then snuggle up and listen together.</p>
+    <button type="button" id="shelf-open" class="btn btn-soft shelf-open" hidden>🎧 My recordings <span id="shelf-count"></span></button>
   </header>
 
   <main>
@@ -117,12 +118,23 @@
               <input type="range" id="pitch" min="0.7" max="1.5" step="0.05" value="1">
             </div>
             <label class="check"><input type="checkbox" id="follow" checked> Follow along (scroll to the part being read)</label>
+            <div id="pv-box" class="pv-box" hidden>
+              <p class="pv-title">💛 Hear stories in your own voice (Apple Personal Voice)</p>
+              <ol class="pv-steps">
+                <li>On this iPhone or iPad (iOS 17+): Settings › Accessibility › Personal Voice › Create a Personal Voice.</li>
+                <li>In the same screen, turn on “Allow Apps to Request to Use”.</li>
+                <li>Come back and tap the button below. Your voice stays on this device.</li>
+              </ol>
+              <button type="button" id="pv-btn" class="btn btn-small">👪 Use my Personal Voice<i class="mini-lock" aria-hidden="true">🔒</i></button>
+              <p id="pv-msg" class="pv-msg" role="status"></p>
+            </div>
             <p id="voice-help" class="voice-help"><strong>👪 Nicer voice tip:</strong> <span id="voice-help-text"></span></p>
             <button type="button" id="reset-voice" class="btn btn-small btn-ghost">↺ Reset speed &amp; pitch</button>
           </div>
         </details>
 
         <div class="extras">
+          <button type="button" id="record-btn" class="btn btn-small record-btn">🎙️ Record my voice<i class="mini-lock" aria-hidden="true">🔒</i></button>
           <button type="button" id="again" class="btn btn-small">🔄 New story</button>
           <button type="button" id="download" class="btn btn-small">💾 Save as text</button>
           <button type="button" id="print" class="btn btn-small">🖨️ Print</button>
@@ -150,6 +162,66 @@
     <p><button type="button" id="grownups-btn" class="linkish">👪 Grown-ups: unlock or restore purchase</button></p>
   </footer>
 
+  <!-- Record yourself reading (grown-ups). Audio is saved only on this device. -->
+  <section id="studio" class="screen studio" hidden role="dialog" aria-modal="true" aria-labelledby="studio-h">
+    <div class="screen-top">
+      <h2 id="studio-h" class="screen-h">🎙️ Read it in your voice</h2>
+      <button type="button" id="studio-close" class="btn btn-icon btn-ghost screen-x" aria-label="Close">✕</button>
+    </div>
+    <p class="studio-story" id="studio-title"></p>
+    <p class="studio-help">Read each line out loud, then tap <strong>Next</strong> (or tap the words). Pause any time. Your recording stays on this device.</p>
+    <div class="tp" aria-live="polite">
+      <p id="tp-prev" class="tp-prev"></p>
+      <p id="tp-cur" class="tp-cur" tabindex="0"></p>
+      <p id="tp-next" class="tp-next"></p>
+    </div>
+    <div class="tp-nav">
+      <button type="button" id="tp-back" class="btn btn-small">◀ Back</button>
+      <span id="tp-pos" class="tp-pos"></span>
+      <button type="button" id="tp-next-btn" class="btn btn-primary">Next ▶</button>
+    </div>
+    <div class="tp-progress" aria-hidden="true"><span id="tp-bar"></span></div>
+    <div class="rec-row">
+      <button type="button" id="rec-btn" class="btn btn-big rec-btn">🔴 Start recording</button>
+      <div class="rec-meter" aria-hidden="true"><span id="rec-level"></span></div>
+      <span id="rec-time" class="rec-time">0:00</span>
+    </div>
+    <label class="check"><input type="checkbox" id="auto-turn"> Turn to the next line by itself when I pause</label>
+    <div class="rec-actions">
+      <button type="button" id="rec-redo" class="btn btn-small">↺ Redo last part</button>
+      <button type="button" id="rec-save" class="btn btn-primary">✓ Save recording</button>
+    </div>
+    <p id="studio-msg" class="studio-msg" role="status"></p>
+  </section>
+
+  <!-- My recordings: stories read by a grown-up, for kids to replay -->
+  <section id="shelf" class="screen shelf" hidden role="dialog" aria-modal="true" aria-labelledby="shelf-h">
+    <div class="screen-top">
+      <h2 id="shelf-h" class="screen-h">🎧 My recordings</h2>
+      <button type="button" id="shelf-close" class="btn btn-icon btn-ghost screen-x" aria-label="Close">✕</button>
+    </div>
+    <div id="shelf-list-view">
+      <p class="shelf-lead">Stories read by your grown-ups. Tap one to listen. 💛</p>
+      <ul id="shelf-list" class="shelf-list"></ul>
+      <p id="shelf-empty" class="empty" hidden>No recordings yet. A grown-up can tap 🎙️ <strong>Record my voice</strong> under any story.</p>
+      <p id="shelf-storage" class="shelf-storage"></p>
+      <button type="button" id="shelf-edit" class="linkish">👪 Grown-ups: rename or delete</button>
+    </div>
+    <div id="player-view" hidden>
+      <button type="button" id="player-back" class="btn btn-small">◀ All recordings</button>
+      <h3 id="player-title" class="player-title"></h3>
+      <p id="player-sub" class="player-sub"></p>
+      <div class="pl-controls">
+        <button type="button" id="pl-play" class="btn btn-primary pl-play">▶️ Play</button>
+        <span id="pl-now" class="pl-time">0:00</span>
+        <input type="range" id="pl-seek" min="0" max="1" step="0.05" value="0" aria-label="Position in the story">
+        <span id="pl-total" class="pl-time">0:00</span>
+      </div>
+      <div id="player-text" class="player-text book"></div>
+      <audio id="player-audio" preload="auto"></audio>
+    </div>
+  </section>
+
   <div id="modal-backdrop" class="modal-backdrop" hidden>
     <section id="upsell" class="modal card" role="dialog" aria-modal="true" aria-labelledby="upsell-title" hidden>
       <button type="button" class="modal-x btn btn-icon btn-ghost" data-close aria-label="Close">✕</button>
@@ -159,6 +231,7 @@
       <ul class="perks">
         <li>🗺️ All 8 story worlds: Adventure, Friendship, Space, Under the Sea, Dinosaurs and Magic Forest join Bedtime and Animals</li>
         <li>🕰️ Longer stories (~3–4 minutes)</li>
+        <li>🎙️ Read stories in your own voice: record yourself reading, saved only on this device<span class="ios-only-perk"> (and Apple Personal Voice on iPhone)</span></li>
         <li>♾️ Unlimited new stories in every world</li>
         <li>💛 One payment of <strong id="upsell-price">$4.99</strong>. No subscription, no ads, ever.</li>
       </ul>
@@ -211,6 +284,7 @@
   <script src="native-shim.js"></script>
   <script src="unlock.js"></script>
   <script src="app.js"></script>
+  <script src="recorder.js"></script>
   <script src="pwa.js"></script>
 </body>
 </html>
