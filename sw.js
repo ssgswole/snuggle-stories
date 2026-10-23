@@ -1,6 +1,6 @@
 /* Snuggle Stories service worker: caches the app shell so the app opens offline.
    Stories are generated on-device, so there is nothing else to fetch. No analytics, no network calls. */
-const CACHE = "snuggle-stories-v2-unlock";
+const CACHE = "snuggle-stories-v3-voice";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./pwa.js", "./native-shim.js", "./unlock.js", "./manifest.webmanifest",
   "./icons/icon-48.png", "./icons/icon-72.png", "./icons/icon-96.png", "./icons/icon-144.png",

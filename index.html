@@ -91,6 +91,11 @@
           <button type="button" id="stop" class="btn btn-icon" aria-label="Stop" title="Stop" disabled>⏹️ <span class="lbl">Stop</span></button>
         </div>
         <p id="status" class="status" role="status"></p>
+        <div id="voice-tip" class="voice-tip" hidden role="note">
+          <button type="button" id="voice-tip-close" class="btn btn-icon btn-ghost voice-tip-x" aria-label="Hide this tip" title="Hide">✕</button>
+          <p class="voice-tip-title">👪 Grown-ups: want a softer, more natural reading voice?</p>
+          <p id="voice-tip-text" class="voice-tip-text"></p>
+        </div>
         <p id="no-tts" class="warn" hidden>😕 This browser can't read aloud. Try Chrome, Edge, or Safari. You can still read the story together!</p>
 
         <details class="voice-settings">
@@ -109,9 +114,10 @@
             </div>
             <div class="field">
               <label for="pitch" class="field-label small">Pitch <output id="pitch-val"></output></label>
-              <input type="range" id="pitch" min="0.7" max="1.5" step="0.05" value="1.05">
+              <input type="range" id="pitch" min="0.7" max="1.5" step="0.05" value="1">
             </div>
             <label class="check"><input type="checkbox" id="follow" checked> Follow along (scroll to the part being read)</label>
+            <p id="voice-help" class="voice-help"><strong>👪 Nicer voice tip:</strong> <span id="voice-help-text"></span></p>
             <button type="button" id="reset-voice" class="btn btn-small btn-ghost">↺ Reset speed &amp; pitch</button>
           </div>
         </details>

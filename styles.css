@@ -342,3 +342,13 @@ body.modal-open { overflow: hidden; }
 .gate-form .btn { flex: 0 1 auto; }
 
 @media print { .modal-backdrop { display: none !important; } }
+
+/* Sentence-level follow-along + grown-up voice tip */
+.speakable .sent { border-radius: 6px; transition: background-color .25s ease; }
+.speakable.reading .sent.reading-now { background: #ffd978; box-shadow: 0 0 0 2px #ffd978; }
+.voice-tip { position: relative; background: #eef6ff; border: 2px solid #b9d7ff; border-radius: 16px; padding: 12px 44px 12px 14px; margin: 10px 0; }
+.voice-tip-title { margin: 0 0 4px; font-weight: 800; }
+.voice-tip-text { margin: 0; font-size: .95em; line-height: 1.45; }
+.voice-tip-x { position: absolute; top: 6px; right: 6px; min-height: 36px; padding: 0 10px; font-size: 1rem; }
+.voice-help { font-size: .88em; line-height: 1.45; opacity: .9; margin: 4px 0 8px; }
+@media print { .voice-tip { display: none !important; } .speakable .sent.reading-now { background: none; box-shadow: none; } }

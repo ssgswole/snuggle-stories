@@ -889,8 +889,8 @@
 
   var $ = function (s) { return document.querySelector(s); };
   var current = null;     // current story object
-  var segments = [];      // [{el, chunks:[text]}] one per title/heading/paragraph
-  var queue = [];         // flat list of {seg, text}
+  var segments = [];      // [{el, items:[chunk]}] one per title/heading/paragraph
+  var queue = [];         // flat list of {seg, span, say, gap}
   var pos = 0;            // index of the chunk being (or about to be) read
   var state = "idle";     // idle | playing | paused
   var runId = 0;          // invalidates callbacks from cancelled utterances
@@ -1113,21 +1113,21 @@
     meta.textContent = story.themeLabel + " · " + cap(story.mood) + " · ages " + story.age + " · about " + story.minutes + " min · story no. " + story.seed;
     head.appendChild(emoji); head.appendChild(h); head.appendChild(meta);
     book.appendChild(head);
-    addSegment(h, story.title + ".");
+    addSegment(h, story.title + ".", "title", GAP.title);
     story.chapters.forEach(function (c, i) {
       var sec = document.createElement("section"); sec.className = "chapter";
       var ch = document.createElement("h3"); ch.className = "speakable";
       ch.textContent = "Chapter " + (i + 1) + ": " + c.title;
       sec.appendChild(ch);
-      addSegment(ch, "Chapter " + (i + 1) + ". " + c.title + ".");
+      addSegment(ch, "Chapter " + (i + 1) + ". " + c.title + ".", "heading", GAP.heading);
       c.paragraphs.forEach(function (p) {
-        var el = document.createElement("p"); el.className = "speakable"; el.textContent = p;
-        sec.appendChild(el); addSegment(el, p);
+        var el = document.createElement("p"); el.className = "speakable";
+        sec.appendChild(el); addSegment(el, p, "para", GAP.paragraph);
       });
       book.appendChild(sec);
     });
     queue = [];
-    segments.forEach(function (s, si) { s.chunks.forEach(function (t) { queue.push({ seg: si, text: t }); }); });
+    segments.forEach(function (s) { s.items.forEach(function (it) { queue.push(it); }); });
     pos = 0;
     $("#listen").hidden = false;
     $("#empty-state").hidden = true;
@@ -1135,32 +1135,129 @@
     $("#listen").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function addSegment(el, text) {
-    // Sentence-sized chunks avoid Chrome's long-utterance cut-off and make pause/resume precise.
-    var sentences = text.match(/[^.!?]+[.!?]+['"’”]*\s*|[^.!?]+$/g) || [text];
-    var chunks = [], buf = "";
-    sentences.forEach(function (s) {
-      if ((buf + s).length > 180 && buf) { chunks.push(buf.trim()); buf = ""; }
-      buf += s;
+  /* ---------------- Text → spoken chunks ----------------
+     Every paragraph is split into sentence-sized chunks (long sentences at commas) and queued one by
+     one. Short utterances dodge Chrome's ~15 s cut-off and iOS stalls, give natural pauses, and let
+     the follow-along highlight track the exact sentence being read. */
+  var ABBR = /\b(Mr|Mrs|Ms|Dr|St|Mt|Jr|Sr|Prof|Capt|vs|etc)\.$/i;
+  var GAP = { comma: 60, sentence: 170, ellipsis: 420, paragraph: 650, heading: 850, title: 1000 };
+
+  function splitDisplay(text) {
+    // Returns [{text, pause}] whose .text pieces join back to exactly `text` (so spans can wrap them).
+    var out = [], start = 0, m, re = /(\.{3,}|…|[.!?]+)(['"’”)\]]*)(\s+|$)/g;
+    while ((m = re.exec(text))) {
+      var end = m.index + m[0].length;
+      if (m[1] === "." && ABBR.test(text.slice(start, m.index + 1))) continue;     // "Mr. Bramble" is one sentence
+      if (end === m.index) { re.lastIndex++; continue; }
+      out.push({ text: text.slice(start, end), pause: /\.\.|…/.test(m[1]) ? GAP.ellipsis : GAP.sentence });
+      start = end;
+      if (end >= text.length) break;
+    }
+    if (start < text.length) out.push({ text: text.slice(start), pause: GAP.sentence });
+    var res = [];
+    out.forEach(function (piece) {                      // very long sentence → split at , ; : or dashes
+      if (piece.text.length <= 130) { res.push(piece); return; }
+      var parts = piece.text.split(/(?<=[,;:—–])\s+/), buf = "";
+      parts.forEach(function (p, i) {
+        buf += (buf ? " " : "") + p;
+        var restLen = parts.slice(i + 1).join(" ").length;
+        if (i < parts.length - 1 && buf.length >= 40 && restLen >= 25) { res.push({ text: buf + " ", pause: GAP.comma }); buf = ""; }
+      });
+      if (buf) res.push({ text: buf, pause: piece.pause });
     });
-    if (buf.trim()) chunks.push(buf.trim());
-    segments.push({ el: el, chunks: chunks });
-    el.addEventListener("click", function () { // tap a paragraph to read from there
+    return res.filter(function (p) { return p.text.trim(); });
+  }
+
+  // Clean text so the voice reads words only: no emoji names ("crescent moon"), symbols or markup.
+  function speakable(s) {
+    s = String(s)
+      .replace(/<[^>]*>/g, " ")
+      .replace(/[\p{Extended_Pictographic}\p{So}\u{FE0F}\u{FE0E}\u{200D}\u{20E3}\u{1F1E6}-\u{1F1FF}]/gu, " ")
+      .replace(/&/g, " and ")
+      .replace(/\s*[—–]\s*/g, ", ")                    // dashes → a short breath
+      .replace(/\s*(\.{2,}|…)\s*/g, ", ")               // ellipses → pause (and never "dot dot dot")
+      .replace(/[“”"«»*_~#<>\[\]{}|^`\\=+@·•]/g, " ")
+      .replace(/\//g, " ")
+      .replace(/\s+/g, " ")
+      .replace(/(^|\s)['‘’](?=\s|$)/g, " ")             // stray quote marks
+      .replace(/^[\s,'‘’]+/, "")                        // leading "...ello" / commas
+      .replace(/\s+([,.!?;:])/g, "$1")
+      .replace(/,\s*([.!?])/g, "$1")
+      .replace(/([,;:])(\s*[,;:])+/g, "$1")
+      .trim();
+    s = s.replace(/[,;:]+(['’]?)$/, ".$1");             // ends on a pause → finish as a sentence
+    return /[\p{L}\p{N}]/u.test(s) ? s : "";
+  }
+
+  function addSegment(el, text, kind, gapAfter) {
+    // kind "para": wrap each sentence in a span for sentence-level highlighting.
+    var si = segments.length, seg = { el: el, items: [] };
+    segments.push(seg);
+    if (kind === "para") {
+      el.textContent = "";
+      var pieces = splitDisplay(text);
+      pieces.forEach(function (p, k) {
+        var span = document.createElement("span"); span.className = "sent"; span.textContent = p.text;
+        el.appendChild(span);
+        var say = speakable(p.text);
+        if (say) seg.items.push({ seg: si, span: span, say: say, gap: k === pieces.length - 1 ? gapAfter : p.pause });
+      });
+    } else {
+      var say = speakable(text);
+      if (say) seg.items.push({ seg: si, span: null, say: say, gap: gapAfter });
+    }
+    el.addEventListener("click", function (e) { // tap a paragraph (or sentence) to read from there
       if (!synth) return;
-      var idx = -1;
-      for (var i = 0; i < queue.length; i++) { if (segments[queue[i].seg].el === el) { idx = i; break; } }
+      var idx = -1, sp = e.target && e.target.closest ? e.target.closest(".sent") : null;
+      for (var i = 0; i < queue.length; i++) {
+        if (sp ? queue[i].span === sp : queue[i].seg === si) { idx = i; break; }
+      }
       if (idx >= 0) speakFrom(idx);
     });
   }
 
-  /* ---------------- Speech ---------------- */
+  /* ---------------- Voices: rank for naturalness, hide novelty/robotic ones ---------------- */
+  var UA = navigator.userAgent || "";
+  var IS_IOS = /iPad|iPhone|iPod/.test(UA) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var IS_ANDROID = /Android/i.test(UA);
+  var IS_MAC = !IS_IOS && /Macintosh/.test(UA);
+  var IS_WIN = /Windows/.test(UA);
+  var IS_APPLE_WEBKIT = (IS_IOS || IS_MAC) && /AppleWebKit/.test(UA) && !/Chrome|Chromium|Edg|Firefox|FxiOS|CriOS/.test(UA) || IS_IOS;
+  var IS_NATIVE = document.documentElement.classList.contains("native-app");
+  var IS_MOBILE = IS_IOS || IS_ANDROID;
+
+  var NOVELTY_NAMES = /\b(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|hysterical|junior|organ|superstar|trinoids|whisper|wobble|zarvox|fred|ralph|kathy|jester|grandma|grandpa|eddy|flo|reed|rocko|sandy|shelley|espeak|mbrola)\b/i;
+  var NOVELTY_URIS = /espeak|mbrola|novelty|eloquence|speech\.synthesis\.voice\.(albert|bahh|bells|boing|bubbles|cellos|deranged|fred|hysterical|junior|organ|princess|ralph|kathy|trinoids|whisper|zarvox|badnews|goodnews|pipeorgan|bad|good)/i;
+  var GOOD_APPLE = /\b(samantha|ava|allison|susan|karen|daniel|moira|tessa|serena|kate|zoe|zoë|evan|nicky|joelle|nathan|noelle|tom|fiona|rishi|veena|lee|matilda|catherine|gordon|arthur|martha|aaron|nora|stephanie|oliver)\b/i;
+  var badVoices = {};   // voices that errored (e.g. online voice while offline) → skip for this session
+
+  function voiceKey(v) { return v.voiceURI || v.name; }
+  function isNovelty(v) { return NOVELTY_NAMES.test(v.name || "") || NOVELTY_URIS.test(v.voiceURI || ""); }
+
+  // Quality only (0–60). >= 40 counts as "natural sounding".
+  function voiceQuality(v) {
+    var n = (v.name || "") + " " + (v.voiceURI || "");
+    if (/premium/i.test(n)) return 60;
+    if (/natural|neural|wavenet|studio|journey/i.test(n)) return 58;
+    if (/siri/i.test(n)) return 55;
+    if (/enhanced/i.test(n)) return 50;
+    if (/google (us|uk) english/i.test(n)) return 45;
+    if (/microsoft .*online/i.test(n)) return 45;
+    if (/-x-[a-z]{3}-network/i.test(n)) return 42;           // Android Google TTS (online)
+    if (/-x-[a-z]{3}-local|-language$/i.test(n)) return 40;  // Android Google TTS (on-device, decent)
+    if (IS_ANDROID && /^english\b/i.test(v.name || "")) return 40; // Chrome on Android (Google TTS)
+    if (/^google\b/i.test(v.name || "")) return 34;
+    if (GOOD_APPLE.test(v.name || "")) return 25;              // Apple "compact" voices: OK, a bit flat
+    if (/microsoft/i.test(n)) return 15;                       // Zira/David/Hazel desktop voices
+    return 8;
+  }
   function scoreVoice(v) {
-    var n = (v.name || "").toLowerCase(), s = 0;
-    if (/^en/i.test(v.lang)) s += 10;
-    if (/en[-_](us|gb|au|ie|ca|nz)/i.test(v.lang)) s += 2;
-    if (/(female|samantha|karen|moira|tessa|fiona|victoria|zira|aria|jenny|libby|sonia|natasha|serena|allison|ava|susan|hazel|kate|emma|michelle|google uk english female|google us english)/.test(n)) s += 5;
-    if (/(natural|neural|enhanced|premium|online)/.test(n)) s += 4;
-    if (/(novelty|whisper|bad news|good news|bells|boing|bubbles|cellos|zarvox|trinoids|albert|jester|organ|superstar|wobble|deranged|hysterical|bahh|pipe organ|grandpa|grandma|rocko|eddy|reed)/.test(n)) s -= 15;
+    var s = voiceQuality(v), lang = String(v.lang || "").replace("_", "-").toLowerCase();
+    var want = String(navigator.language || "en-US").toLowerCase();
+    if (lang === want) s += 6; else if (lang === "en-us" || lang === "en-gb") s += 3; else if (/^en/.test(lang)) s += 1;
+    if (v.localService !== false) s += 2;      // works offline and avoids network hiccups
+    if (v["default"]) s += 2;
+    if (/samantha|ava|zoe|allison|aria|jenny|sonia|libby/i.test(v.name || "")) s += 1; // warm storyteller voices
     return s;
   }
 
@@ -1168,88 +1265,194 @@
     if (!synth) return;
     var all = synth.getVoices() || [];
     if (!all.length) return;
-    var en = all.filter(function (v) { return /^en/i.test(v.lang); });
-    voices = (en.length ? en : all).slice().sort(function (a, b) { return scoreVoice(b) - scoreVoice(a) || a.name.localeCompare(b.name); });
-    var sel = $("#voice");
+    var en = all.filter(function (v) { return /^en/i.test(v.lang || ""); });
+    var pool = (en.length ? en : all).filter(function (v) { return !isNovelty(v); });
+    if (!pool.length) pool = en.length ? en : all;
+    voices = pool.slice().sort(function (a, b) { return scoreVoice(b) - scoreVoice(a) || (a.name || "").localeCompare(b.name || ""); });
+    var sel = $("#voice"), keep = sel.value || prefs.voice;
     sel.innerHTML = "";
-    voices.forEach(function (v, i) {
-      var o = document.createElement("option");
-      o.value = v.voiceURI || v.name;
-      o.textContent = (i === 0 ? "⭐ " : "") + v.name.replace(/^(Microsoft|Google)\s+/, "") + " (" + v.lang + ")";
-      sel.appendChild(o);
+    var groups = [["✨ Most natural", voices.filter(function (v) { return voiceQuality(v) >= 40; })],
+                  ["Other voices", voices.filter(function (v) { return voiceQuality(v) < 40; })]];
+    groups.forEach(function (g) {
+      if (!g[1].length) return;
+      var parent = sel;
+      if (groups[0][1].length && groups[1][1].length) { parent = document.createElement("optgroup"); parent.label = g[0]; sel.appendChild(parent); }
+      g[1].forEach(function (v) {
+        var o = document.createElement("option");
+        o.value = voiceKey(v);
+        o.textContent = (v === voices[0] ? "⭐ " : "") + voiceLabel(v);
+        parent.appendChild(o);
+      });
     });
-    if (prefs.voice && voices.some(function (v) { return (v.voiceURI || v.name) === prefs.voice; })) sel.value = prefs.voice;
+    var pick = prefs.voice && voices.some(function (v) { return voiceKey(v) === prefs.voice; }) ? prefs.voice
+      : keep && voices.some(function (v) { return voiceKey(v) === keep; }) ? keep : voiceKey(voices[0]);
+    sel.value = pick;
     $("#voice-field").hidden = voices.length < 2;
+    updateVoiceTip();
+  }
+
+  function voiceLabel(v) {
+    var name = String(v.name || "Voice").replace(/^Microsoft\s+/, "").replace(/\s*-\s*English.*$/, "");
+    var uri = v.voiceURI || "", m = uri.match(/-x-([a-z]{3})-(local|network)/i);
+    if (m) name += " · voice " + m[1].toUpperCase() + (m[2] === "network" ? " (online)" : "");
+    if (/premium/i.test(uri) && !/premium/i.test(name)) name += " (Premium)";
+    else if (/enhanced/i.test(uri) && !/enhanced/i.test(name)) name += " (Enhanced)";
+    if (name.indexOf("(") < 0 || m) name += " · " + v.lang;
+    return name;
   }
 
   function selectedVoice() {
     var val = $("#voice").value;
-    return voices.filter(function (v) { return (v.voiceURI || v.name) === val; })[0] || voices[0] || null;
+    var v = voices.filter(function (x) { return voiceKey(x) === val; })[0];
+    if (v && !badVoices[voiceKey(v)]) return v;
+    return voices.filter(function (x) { return !badVoices[voiceKey(x)]; })[0] || null;
   }
+
+  // Grown-up tip when this device only has basic (robotic-sounding) voices.
+  function voiceHelpText() {
+    if (IS_IOS) return "On iPhone or iPad: open Settings › Accessibility › Spoken Content › Voices › English, download an “Enhanced” or “Premium” voice (Ava, Zoe or Evan sound lovely), then reopen Snuggle Stories and pick it here. No sound? Check the silent switch and volume.";
+    if (IS_MAC) return "On a Mac: System Settings › Accessibility › Spoken Content › System voice › Manage Voices…, download an “Enhanced” or “Premium” English voice (e.g. Ava or Zoe), then reload this page and pick it here.";
+    if (IS_ANDROID) return "On Android: open Settings, search “Text-to-speech”, choose “Speech Services by Google”, then Install voice data › English and download a voice. Reopen Snuggle Stories and pick it here.";
+    if (IS_WIN) return "On Windows: open this page in Microsoft Edge for its very natural “Online (Natural)” voices, or in Chrome for the Google voices.";
+    return "For a more natural voice, try Microsoft Edge or Google Chrome, which include nicer built-in voices.";
+  }
+  function updateVoiceTip() {
+    var best = voices[0], basic = !best || voiceQuality(best) < 40;
+    var tip = $("#voice-tip"), help = $("#voice-help");
+    if (help) $("#voice-help-text").textContent = voiceHelpText();
+    if (tip) {
+      $("#voice-tip-text").textContent = voiceHelpText();
+      tip.hidden = !(basic && voices.length) || !!prefs.voiceTipClosed;
+    }
+  }
+
+  /* ---------------- Rate / pitch ---------------- */
+  function clamp(x, lo, hi) { x = +x; if (!isFinite(x)) x = 1; return Math.min(hi, Math.max(lo, x)); }
+  // WebKit on iPhone/iPad/Mac maps rate < 1 linearly onto Apple's speech scale, which sounds too slow at the low end,
+  // and rate > 1 jumps quickly. Soften both ends so the slider feels the same as Chrome. (Native app: see native-shim.js.)
+  function effectiveRate(r) {
+    r = clamp(r, 0.5, 1.5);
+    if (IS_APPLE_WEBKIT && !IS_NATIVE) r = r < 1 ? 1 - (1 - r) * 0.8 : 1 + (r - 1) * 0.8;
+    return Math.round(r * 100) / 100;
+  }
+  function effectivePitch(p) { return clamp(p, 0.7, 1.5); }
 
   function utter(text) {
     var u = new SpeechSynthesisUtterance(text);
     var v = selectedVoice();
     if (v) { u.voice = v; u.lang = v.lang; } else { u.lang = "en-US"; }
-    u.rate = +$("#rate").value; u.pitch = +$("#pitch").value;
+    u.rate = effectiveRate($("#rate").value); u.pitch = effectivePitch($("#pitch").value); u.volume = 1;
     return u;
   }
 
+  /* ---------------- Playback: a queue of short utterances ---------------- */
+  var timers = {};
+  function clearTimers() { Object.keys(timers).forEach(function (k) { clearTimeout(timers[k]); }); timers = {}; }
+  function estimateMs(text, rate) { return 1000 * text.length / (14 * (rate || 1)); }
+
+  var keepAlive = null;   // Chrome desktop's online voices stop after ~15 s unless nudged
+  function startKeepAlive() {
+    stopKeepAlive();
+    if (IS_NATIVE || IS_MOBILE || IS_APPLE_WEBKIT || !synth.pause) return;
+    keepAlive = setInterval(function () {
+      var v = selectedVoice();
+      if (state === "playing" && v && v.localService === false && synth.speaking && !synth.paused) { synth.pause(); synth.resume(); }
+    }, 10000);
+  }
+  function stopKeepAlive() { if (keepAlive) clearInterval(keepAlive); keepAlive = null; }
+
+  // NOTE: must stay synchronous from the click handler to the first synth.speak() (iOS requires it).
   function speakFrom(index) {
     if (!synth || !queue.length) return;
     var id = ++runId;
-    synth.cancel();
-    state = "playing"; updateButtons();
-    (function next(i) {
-      if (id !== runId) return;
-      if (i >= queue.length) { finish(); return; }
-      pos = i;
-      highlight(queue[i].seg);
-      var u = utter(queue[i].text);
-      var gap = queue[i + 1] && queue[i + 1].seg !== queue[i].seg ? 450 : 120; // a breath between paragraphs
-      var done = false;
-      var onEnd = function () {
-        if (done || id !== runId) return; done = true;
-        setTimeout(function () { next(i + 1); }, gap);
-      };
-      u.onend = onEnd;
-      u.onerror = function (e) { if (e && (e.error === "interrupted" || e.error === "canceled")) return; onEnd(); };
-      synth.speak(u);
-    })(index);
+    clearTimers();
+    if (synth.speaking || synth.pending || synth.paused) synth.cancel();   // clear a stuck/old queue first
+    if (synth.paused && synth.resume) synth.resume();
+    state = "playing"; updateButtons(); startKeepAlive();
+    speakChunk(Math.max(0, Math.min(index, queue.length - 1)), id, 0);
   }
 
-  function highlight(si) {
-    segments.forEach(function (s, i) { s.el.classList.toggle("reading", i === si); });
-    var el = segments[si] && segments[si].el;
+  function speakChunk(i, id, attempt) {
+    if (id !== runId) return;
+    if (i >= queue.length) { finish(); return; }
+    pos = i;
+    var item = queue[i];
+    highlight(i);
+    var u = utter(item.say), started = false, done = false;
+    var advance = function () {
+      if (done || id !== runId) return; done = true; clearTimers();
+      var gap = Math.round(item.gap / Math.max(0.6, u.rate || 1));
+      if (document.hidden || !gap) speakChunk(i + 1, id, 0);                 // background tabs throttle timers
+      else timers.gap = setTimeout(function () { speakChunk(i + 1, id, 0); }, gap);
+    };
+    var retry = function () { if (done || id !== runId) return; done = true; clearTimers(); synth.cancel(); speakChunk(i, id, attempt + 1); };
+    u.onstart = function () { started = true; };
+    u.onend = advance;
+    u.onerror = function (e) {
+      var err = (e && e.error) || "";
+      if (err === "interrupted" || err === "canceled" || done || id !== runId) return;
+      if (attempt < 2 && u.voice && /network|synthesis|voice|unavailable|language/.test(err)) {
+        badVoices[voiceKey(u.voice)] = true; retry(); return;   // e.g. online voice while offline → next best voice
+      }
+      advance();
+    };
+    // Watchdogs: an utterance can be silently dropped (Safari right after cancel, Chrome stuck queue) or never "end".
+    timers.start = setTimeout(function () {
+      if (started || done || id !== runId || synth.speaking || synth.pending) return;
+      if (attempt < 1) retry(); else advance();
+    }, 3000);
+    timers.end = setTimeout(function () {
+      if (done || id !== runId) return;
+      if (synth.speaking) { done = true; clearTimers(); synth.cancel(); done = false; }
+      advance();
+    }, estimateMs(item.say, u.rate) * 2.5 + 5000);
+    synth.speak(u);
+  }
+
+  function highlight(i) {
+    var item = queue[i]; if (!item) return;
+    segments.forEach(function (s, k) { s.el.classList.toggle("reading", k === item.seg); });
+    var prev = document.querySelector(".sent.reading-now"); if (prev && prev !== item.span) prev.classList.remove("reading-now");
+    if (item.span) item.span.classList.add("reading-now");
+    var el = item.span || segments[item.seg].el;
     if (el && $("#follow").checked) {
       var r = el.getBoundingClientRect();
       if (r.top < 70 || r.bottom > window.innerHeight - 200) el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }
 
-  function clearHighlight() { segments.forEach(function (s) { s.el.classList.remove("reading"); }); }
+  function clearHighlight() {
+    segments.forEach(function (s) { s.el.classList.remove("reading"); });
+    Array.prototype.forEach.call(document.querySelectorAll(".sent.reading-now"), function (s) { s.classList.remove("reading-now"); });
+  }
 
   function finish() {
+    clearTimers(); stopKeepAlive();
     state = "idle"; pos = 0; clearHighlight(); updateButtons();
     $("#status").textContent = "The End! 🌟 Make another story, or listen again.";
   }
 
+  // Pause = cancel + remember the sentence; "Keep listening" restarts that sentence.
+  // (Native pause/resume is unreliable on iOS and Android, so this works the same everywhere.)
+  function pauseSpeech() {
+    if (state !== "playing") return;
+    runId++; clearTimers(); stopKeepAlive(); synth.cancel(); state = "paused"; updateButtons();
+  }
   function playPause() {
     if (!synth) return;
-    if (state === "playing") { // pause = stop after cancel, resume from the same sentence (works on every browser)
-      runId++; synth.cancel(); state = "paused"; updateButtons();
-    } else {
-      speakFrom(state === "paused" ? pos : 0);
-    }
+    if (state === "playing") pauseSpeech();
+    else speakFrom(state === "paused" ? pos : 0);
   }
 
   function stopSpeech() {
-    runId++;
+    runId++; clearTimers(); stopKeepAlive();
     if (synth) synth.cancel();
     state = "idle"; pos = 0; clearHighlight(); updateButtons();
   }
 
   function restartIfPlaying() { if (state === "playing") speakFrom(pos); }
+  root.SnuggleSpeech = { splitDisplay: splitDisplay, speakable: speakable, voiceQuality: voiceQuality,   // for tests
+    effectiveRate: effectiveRate, state: function () { return { state: state, pos: pos, queue: queue.length }; } };
 
   function updateButtons() {
     var pp = $("#play");
@@ -1283,8 +1486,13 @@
       setRadio("mood", f.mood); setRadio("length", f.length);
     }
     initUnlock();
-    if (prefs.rate) $("#rate").value = prefs.rate;
-    if (prefs.pitch) $("#pitch").value = prefs.pitch;
+    // Voice update v2: old saved voice/pitch came from the previous (sometimes robotic) auto-pick. Start fresh once.
+    if (prefs.voiceVer !== 2) {
+      delete prefs.voice; if (prefs.pitch == 1.05) delete prefs.pitch;
+      prefs.voiceVer = 2; savePrefs();
+    }
+    if (prefs.rate) $("#rate").value = clamp(prefs.rate, 0.6, 1.3);
+    if (prefs.pitch) $("#pitch").value = clamp(prefs.pitch, 0.7, 1.5);
     var showVals = function () {
       $("#rate-val").textContent = (+$("#rate").value).toFixed(2) + "×";
       $("#pitch-val").textContent = (+$("#pitch").value).toFixed(2);
@@ -1301,7 +1509,7 @@
     $("#download").addEventListener("click", download);
     $("#print").addEventListener("click", function () { window.print(); });
     $("#reset-voice").addEventListener("click", function () {
-      $("#rate").value = 0.9; $("#pitch").value = 1.05; showVals();
+      $("#rate").value = 0.9; $("#pitch").value = 1; showVals();
       prefs.rate = prefs.pitch = undefined; savePrefs(); restartIfPlaying();
     });
     ["rate", "pitch"].forEach(function (id) {
@@ -1311,9 +1519,11 @@
     $("#voice").addEventListener("change", function () { prefs.voice = $("#voice").value; savePrefs(); restartIfPlaying(); });
     $("#test-voice").addEventListener("click", function () {
       if (!synth) return;
-      stopSpeech();
-      synth.speak(utter("Hello! I'm ready to read you a story."));
+      stopSpeech();   // synchronous → speak stays inside the tap (iOS)
+      synth.speak(utter("Once upon a time, a sleepy little star yawned and said goodnight. Are you ready for a story?"));
     });
+    var tipX = $("#voice-tip-close");
+    if (tipX) tipX.addEventListener("click", function () { prefs.voiceTipClosed = true; savePrefs(); $("#voice-tip").hidden = true; });
 
     if (!synth || typeof window.SpeechSynthesisUtterance === "undefined") {
       $("#no-tts").hidden = false;
@@ -1323,8 +1533,16 @@
       loadVoices();
       if (typeof synth.addEventListener === "function") synth.addEventListener("voiceschanged", loadVoices);
       else synth.onvoiceschanged = loadVoices;
-      setTimeout(loadVoices, 700);
+      // getVoices() is async (iOS/Safari often return [] at first and may not fire voiceschanged): poll briefly.
+      [250, 700, 1500, 3000, 6000].forEach(function (ms) { setTimeout(function () { if (voices.length < 2) loadVoices(); }, ms); });
       window.addEventListener("beforeunload", function () { synth.cancel(); });
+      window.addEventListener("pagehide", function () { if (state === "playing") pauseSpeech(); });
+      // Phones stop speech (or throttle our timers) when the app is hidden or the screen locks:
+      // pause cleanly so "Keep listening" resumes from the same sentence. Desktop keeps reading.
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) { if (state === "playing" && IS_MOBILE && !IS_NATIVE) pauseSpeech(); }
+        else if (state === "playing" && !synth.speaking && !synth.pending) speakFrom(pos);   // stuck after returning
+      });
       document.addEventListener("keydown", function (e) { // space bar = play/pause when not typing
         if (e.code === "Space" && current && !/INPUT|SELECT|TEXTAREA|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); playPause(); }
       });
