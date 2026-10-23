@@ -92,10 +92,18 @@
           <button type="button" id="stop" class="btn btn-icon" aria-label="Stop" title="Stop" disabled>⏹️ <span class="lbl">Stop</span></button>
         </div>
         <p id="status" class="status" role="status"></p>
+        <div id="hd-card" class="hd-card" hidden role="note">
+          <button type="button" id="hd-card-x" class="btn btn-icon btn-ghost voice-tip-x" aria-label="Hide" title="Hide">✕</button>
+          <p class="voice-tip-title">✨ New: a natural storyteller voice</p>
+          <p class="voice-tip-text"><span id="hd-card-why"></span>A warm, lifelike voice that runs right on this device. Free, one download, then it works offline.</p>
+          <button type="button" id="hd-get" class="btn btn-small btn-primary">👪 Grown-ups: get the storyteller voice</button>
+        </div>
+        <p id="hd-crash" class="warn" hidden>😕 The storyteller voice ran out of memory on this device last time, so the device voice is reading. <button type="button" id="hd-crash-btn" class="linkish">Try again</button></p>
         <div id="voice-tip" class="voice-tip" hidden role="note">
           <button type="button" id="voice-tip-close" class="btn btn-icon btn-ghost voice-tip-x" aria-label="Hide this tip" title="Hide">✕</button>
           <p class="voice-tip-title">👪 Grown-ups: want a softer, more natural reading voice?</p>
           <p id="voice-tip-text" class="voice-tip-text"></p>
+          <button type="button" id="voice-tip-hd" class="btn btn-small btn-primary" hidden>✨ Get the storyteller voice</button>
         </div>
         <p id="no-tts" class="warn" hidden>😕 This browser can't read aloud. Try Chrome, Edge, or Safari. You can still read the story together!</p>
 
@@ -116,6 +124,7 @@
             <div class="field">
               <label for="pitch" class="field-label small">Pitch <output id="pitch-val"></output></label>
               <input type="range" id="pitch" min="0.7" max="1.5" step="0.05" value="1">
+              <small id="pitch-note" class="pitch-note" hidden>Pitch only changes the device voices.</small>
             </div>
             <label class="check"><input type="checkbox" id="follow" checked> Follow along (scroll to the part being read)</label>
             <div id="pv-box" class="pv-box" hidden>
@@ -128,6 +137,7 @@
               <button type="button" id="pv-btn" class="btn btn-small">👪 Use my Personal Voice<i class="mini-lock" aria-hidden="true">🔒</i></button>
               <p id="pv-msg" class="pv-msg" role="status"></p>
             </div>
+            <button type="button" id="hd-open" class="btn btn-small" hidden>✨ Get the natural storyteller voice</button>
             <p id="voice-help" class="voice-help"><strong>👪 Nicer voice tip:</strong> <span id="voice-help-text"></span></p>
             <button type="button" id="reset-voice" class="btn btn-small btn-ghost">↺ Reset speed &amp; pitch</button>
           </div>
@@ -268,8 +278,36 @@
         <button type="button" id="gp-buy" class="btn btn-primary">✨ Unlock all worlds</button>
         <button type="button" id="gp-restore" class="btn">↩️ Restore purchase</button>
       </div>
+      <div class="modal-actions">
+        <button type="button" id="gp-hd" class="btn">🌟 Storyteller voice</button>
+        <button type="button" id="gp-voicecheck" class="btn btn-ghost">🔧 Voice check</button>
+      </div>
       <p class="modal-small">🔒 No ads, no tracking, no accounts. Stories are made on this device.</p>
       <div class="modal-actions"><button type="button" class="btn btn-soft" data-close>Done</button></div>
+    </section>
+
+    <section id="hdm" class="modal card" role="dialog" aria-modal="true" aria-labelledby="hdm-title" hidden>
+      <button type="button" class="modal-x btn btn-icon btn-ghost" data-close aria-label="Close">✕</button>
+      <div class="modal-emoji" aria-hidden="true">🌟</div>
+      <h2 id="hdm-title" class="modal-title">Natural storyteller voice</h2>
+      <p class="modal-lead">A warm, lifelike voice made right on this device. Free. Download it once and it works offline, even in airplane mode.</p>
+      <p id="hdm-crash" class="warn" hidden>Last time, this device ran out of memory while loading the voice. Closing other apps first often helps.</p>
+      <div id="hdm-voices" class="hd-voices" role="radiogroup" aria-label="Choose a voice"></div>
+      <div id="hdm-progress" class="hd-progress" hidden><div class="hd-bar"><span id="hdm-bar"></span></div><p id="hdm-pct" class="hd-pct"></p></div>
+      <div class="modal-actions"><button type="button" id="hdm-get" class="btn btn-big btn-primary">⬇️ Download</button></div>
+      <p id="hdm-msg" class="modal-msg" role="status"></p>
+      <p id="hdm-unsupported" class="warn" hidden></p>
+      <p id="hdm-manage" class="modal-small" hidden><label class="check"><input type="checkbox" id="hdm-on"> Read stories with the storyteller voice</label><br><button type="button" id="hdm-remove" class="linkish">Remove downloaded voices</button></p>
+      <p class="modal-small">🔒 Only the voice files are downloaded, from the Snuggle Stories website. Stories and names never leave this device. Tip: use Wi‑Fi.</p>
+    </section>
+
+    <section id="vdbg" class="modal card modal-wide" role="dialog" aria-modal="true" aria-labelledby="vdbg-title" hidden>
+      <button type="button" class="modal-x btn btn-icon btn-ghost" data-close aria-label="Close">✕</button>
+      <h2 id="vdbg-title" class="modal-title">🔧 Voice check</h2>
+      <p class="modal-lead">Everything this device offers for reading aloud. Tap Copy and paste it into a message to us.</p>
+      <pre id="vdbg-out" class="vdbg-out"></pre>
+      <div class="modal-actions"><button type="button" id="vdbg-copy" class="btn btn-primary">📋 Copy list</button><button type="button" class="btn btn-soft" data-close>Close</button></div>
+      <p id="vdbg-msg" class="modal-msg" role="status"></p>
     </section>
 
     <section id="info" class="modal card" role="dialog" aria-modal="true" aria-labelledby="info-title" hidden>
@@ -283,6 +321,7 @@
 
   <script src="native-shim.js"></script>
   <script src="unlock.js"></script>
+  <script src="hdvoice.js"></script>
   <script src="app.js"></script>
   <script src="recorder.js"></script>
   <script src="pwa.js"></script>

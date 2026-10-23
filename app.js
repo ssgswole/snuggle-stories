@@ -1129,6 +1129,7 @@
       book.appendChild(sec);
     });
     queue = [];
+    hdReset();
     segments.forEach(function (s) { s.items.forEach(function (it) { queue.push(it); }); });
     pos = 0;
     $("#listen").hidden = false;
@@ -1209,7 +1210,7 @@
       if (say) seg.items.push({ seg: si, span: null, say: say, gap: gapAfter });
     }
     el.addEventListener("click", function (e) { // tap a paragraph (or sentence) to read from there
-      if (!synth) return;
+      if (!synth && !isHd()) return;
       var idx = -1, sp = e.target && e.target.closest ? e.target.closest(".sent") : null;
       for (var i = 0; i < queue.length; i++) {
         if (sp ? queue[i].span === sp : queue[i].seg === si) { idx = i; break; }
@@ -1265,9 +1266,8 @@
   }
 
   function loadVoices() {
-    if (!synth) return;
-    var all = synth.getVoices() || [];
-    if (!all.length) return;
+    var all = synth ? (synth.getVoices() || []) : [];
+    if (!all.length && !hdList.length) return;
     var personal = all.filter(function (v) { return v.personal; });
     all = all.filter(function (v) { return !v.personal; });
     var en = all.filter(function (v) { return /^en/i.test(v.lang || ""); });
@@ -1277,24 +1277,37 @@
     voices = pool.slice().sort(function (a, b) { return scoreVoice(b) - scoreVoice(a) || (a.name || "").localeCompare(b.name || ""); });
     var sel = $("#voice");
     sel.innerHTML = "";
-    var groups = [["✨ Most natural", voices.filter(function (v) { return voiceQuality(v) >= 40; })],
-                  ["Other voices", voices.filter(function (v) { return voiceQuality(v) < 40; })]];
+    var hdOk = hdSupported() && !hdCrashed();
+    if (hdOk && hdList.length) {                                  // natural on-device storyteller voices first
+      var hg = document.createElement("optgroup"); hg.label = "🌟 Storyteller voices (natural)"; sel.appendChild(hg);
+      HD.VOICES.forEach(function (hv) {
+        if (hdList.indexOf(hv.id) < 0) return;
+        var o = document.createElement("option"); o.value = "hd:" + hv.id; o.textContent = "🌟 " + hv.name + " · storyteller"; hg.appendChild(o);
+      });
+    }
+    var groups = [["✨ Most natural device voices", voices.filter(function (v) { return voiceQuality(v) >= 40; })],
+                  ["Other device voices", voices.filter(function (v) { return voiceQuality(v) < 40; })]];
+    var nGroups = (hdOk && hdList.length ? 1 : 0) + (groups[0][1].length ? 1 : 0) + (groups[1][1].length ? 1 : 0);
     groups.forEach(function (g) {
       if (!g[1].length) return;
       var parent = sel;
-      if (groups[0][1].length && groups[1][1].length) { parent = document.createElement("optgroup"); parent.label = g[0]; sel.appendChild(parent); }
+      if (nGroups > 1) { parent = document.createElement("optgroup"); parent.label = g[0]; sel.appendChild(parent); }
       g[1].forEach(function (v) {
         var o = document.createElement("option");
         o.value = voiceKey(v);
-        o.textContent = (v === voices[0] ? "⭐ " : "") + voiceLabel(v);
+        o.textContent = (v === voices[0] && !(hdOk && hdList.length) ? "⭐ " : "") + voiceLabel(v);
         parent.appendChild(o);
       });
     });
     // A grown-up's explicit choice wins; otherwise always the best-ranked voice (re-ranked as voices arrive).
-    var pick = prefs.voice && voices.some(function (v) { return voiceKey(v) === prefs.voice; }) ? prefs.voice : voiceKey(voices[0]);
+    // A downloaded storyteller voice is used unless a grown-up picked a device voice.
+    var hdPick = hdOk && hdList.length && HD.enabled() ? "hd:" + (hdList.indexOf(HD.currentVoice()) >= 0 ? HD.currentVoice() : hdList[0]) : "";
+    var pick = prefs.voice && Array.prototype.some.call(sel.options, function (o) { return o.value === prefs.voice; }) &&
+      !(/^hd:/.test(prefs.voice) && !HD.enabled()) ? prefs.voice : (hdPick || (voices[0] ? voiceKey(voices[0]) : ""));
     sel.value = pick;
-    $("#voice-field").hidden = voices.length < 2;
+    $("#voice-field").hidden = sel.options.length < 2;
     updateVoiceTip();
+    updateHdUi();
   }
 
   function voiceLabel(v) {
@@ -1315,20 +1328,26 @@
   }
 
   // Grown-up tip when this device only has basic (robotic-sounding) voices.
+  // (Apple renamed Accessibility › "Spoken Content" to "Read & Speak" in iOS 26 / macOS 26.)
   function voiceHelpText() {
-    if (IS_IOS) return "On iPhone or iPad: open Settings › Accessibility › Spoken Content › Voices › English, download an “Enhanced” or “Premium” voice (Ava, Zoe or Evan sound lovely), then reopen Snuggle Stories and pick it here. No sound? Check the silent switch and volume.";
-    if (IS_MAC) return "On a Mac: System Settings › Accessibility › Spoken Content › System voice › Manage Voices…, download an “Enhanced” or “Premium” English voice (e.g. Ava or Zoe), then reload this page and pick it here.";
-    if (IS_ANDROID) return "On Android: open Settings, search “Text-to-speech”, choose “Speech Services by Google”, then Install voice data › English and download a voice. Reopen Snuggle Stories and pick it here.";
-    if (IS_WIN) return "On Windows: open this page in Microsoft Edge for its very natural “Online (Natural)” voices, or in Chrome for the Google voices.";
-    return "For a more natural voice, try Microsoft Edge or Google Chrome, which include nicer built-in voices.";
+    var hd = hdSupported() ? " The ✨ storyteller voice is the easy fix: free, natural, one download, and it works offline." : "";
+    if (IS_IOS && !IS_NATIVE) return "On iPhone and iPad, Apple only lets websites and Home Screen apps use its basic built-in voices. The Enhanced and Premium voices in Settings can't be used here, so downloading them won't change this app." + hd;
+    if (IS_IOS) return "In Settings › Accessibility › Read & Speak (called Spoken Content before iOS 26) › Voices › English › Voice, tap the download button next to an Enhanced or Premium voice (Ava, Zoe or Evan sound lovely). Then reopen Snuggle Stories and pick it here. Siri voices can't be used by apps." + hd;
+    if (IS_MAC && IS_APPLE_WEBKIT) return "Safari only lets websites use the Mac's basic built-in voices, not the Enhanced or Premium voices you can download in System Settings." + hd;
+    if (IS_MAC) return "On a Mac: System Settings › Accessibility › Read & Speak (called Spoken Content before macOS 26), click ⓘ next to System voice › Voice, and download an Enhanced or Premium English voice. Then reload this page and pick it here." + hd;
+    if (IS_ANDROID) return "On Android: Settings › Accessibility › Text-to-speech output (Samsung: Settings › General management › Text-to-speech). Choose Google's “Speech Recognition & Synthesis” engine (older phones: “Speech Services by Google”), tap ⚙️ next to it › Install voice data › English (United States), and download a voice. Then reopen Snuggle Stories." + hd;
+    if (IS_WIN) return "Windows' own voices sound flat. Edge has natural “Online” voices, but those send the story text to Microsoft." + hd;
+    return "This browser's voices sound flat." + (hd || " Try Chrome, Edge or Safari.");
   }
   function updateVoiceTip() {
-    var best = voices[0], basic = !best || voiceQuality(best) < 40;
+    var best = voices[0], basic = !best || voiceQuality(best) < 40 || (IS_IOS && !IS_NATIVE);
     var tip = $("#voice-tip"), help = $("#voice-help");
-    if (help) $("#voice-help-text").textContent = voiceHelpText();
+    if (help) { $("#voice-help-text").textContent = voiceHelpText(); help.hidden = isHd(); }
     if (tip) {
       $("#voice-tip-text").textContent = voiceHelpText();
-      tip.hidden = !(basic && voices.length) || !!prefs.voiceTipClosed;
+      var hdCard = hdSupported() && !hdList.length && !hdCrashed() && !prefs.hdCardClosed;   // the ✨ card already says it
+      tip.hidden = !(basic && (voices.length || hdSupported())) || isHd() || hdList.length > 0 || hdCard || !!prefs.voiceTipClosed;
+      var b = $("#voice-tip-hd"); if (b) b.hidden = !hdSupported();
     }
   }
 
@@ -1355,6 +1374,332 @@
       });
     });
   }
+
+  /* ---------------- ✨ Storyteller voice (HD): natural neural voice, generated on this device ----------------
+     hdvoice.js downloads (once, grown-up opt-in) and runs the voice model in a Web Worker. Here we play it:
+     each sentence is generated ahead while the previous one plays, through one <audio> element (unlocked in
+     the first tap, so iPhone keeps playing sentence after sentence, even with the ring/silent switch on silent). */
+  var HD = window.SnuggleHD || null;
+  var hdList = [];                    // storyteller voices downloaded on this device
+  var hdListeners = [];
+  var hdA = { audio: null, unlocked: false, cache: {}, order: [], index: -1, key: "" };
+  var hdStats = [];                   // generation timings (for the grown-up "Voice check")
+  var HD_SAMPLE = "Once upon a time, a sleepy little star yawned and said goodnight. Are you ready for a story?";
+
+  function hdSupported() { return !!HD && HD.support().ok; }
+  function hdCrashed() { return !!HD && HD.support().crashed; }
+  function isHd() {
+    var s = $("#voice");
+    return !!HD && !!s && /^hd:/.test(s.value) && hdList.indexOf(s.value.slice(3)) >= 0 && hdSupported() && !hdCrashed();
+  }
+  function onHdList(fn) { hdListeners.push(fn); }
+  function refreshHdList() {
+    if (!HD || !hdSupported()) { hdList = []; updateHdUi(); return Promise.resolve(); }
+    return HD.downloadedVoices().then(function (l) {
+      hdList = l; loadVoices(); updateHdUi(); updateVoiceTip();
+      hdListeners.forEach(function (fn) { try { fn(); } catch (e) {} });
+    }, function () {});
+  }
+  // Speed slider → how long the model stretches each sound (no chipmunk effect).
+  function hdLengthScale() { var r = clamp($("#rate").value, 0.6, 1.3); return Math.round(clamp(0.95 / r, 0.7, 1.6) * 100) / 100; }
+
+  function wavBlob(pcm, rate) {
+    var n = pcm.length, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+    var w = function (o, str) { for (var i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+    for (var i = 0, o = 44; i < n; i++, o += 2) { var x = Math.max(-1, Math.min(1, pcm[i])); v.setInt16(o, x < 0 ? x * 32768 : x * 32767, true); }
+    return new Blob([buf], { type: "audio/wav" });
+  }
+  // Must run inside the tap: iOS only lets an <audio> element play later if it first played from a tap.
+  function hdUnlock() {
+    if (navigator.audioSession) { try { navigator.audioSession.type = "playback"; } catch (e) {} }  // iOS 17+: ignore the silent switch
+    if (!hdA.audio) {
+      hdA.audio = new Audio(); hdA.audio.preload = "auto";
+      hdA.audio.setAttribute("playsinline", ""); hdA.audio.setAttribute("webkit-playsinline", "");
+    }
+    if (!hdA.unlocked) {
+      hdA.unlocked = true;
+      var a = hdA.audio; a.src = URL.createObjectURL(wavBlob(new Float32Array(1200), 22050));
+      var p = a.play(); if (p && p.catch) p.catch(function () {});
+    }
+  }
+  function hdKey(say) { return (HD.currentVoice() || "") + "|" + hdLengthScale() + "|" + say; }
+  function hdGet(i) {
+    if (i < 0 || i >= queue.length) return null;
+    var say = queue[i].say, k = hdKey(say);
+    if (!hdA.cache[k]) {
+      hdA.cache[k] = HD.synth(say, hdLengthScale()).then(function (r) {
+        hdStats.push({ chars: say.length, ms: r.ms, audioMs: Math.round(1000 * r.pcm.length / r.sampleRate) });
+        if (hdStats.length > 50) hdStats.shift();
+        return URL.createObjectURL(wavBlob(r.pcm, r.sampleRate));
+      });
+      hdA.cache[k].catch(function () { delete hdA.cache[k]; });
+      hdA.order.push(k);
+      while (hdA.order.length > 40) {               // keep memory small: forget the oldest sentences
+        var old = hdA.order.shift(), pr = hdA.cache[old];
+        delete hdA.cache[old];
+        if (pr) pr.then(function (u) { URL.revokeObjectURL(u); }, function () {});
+      }
+    }
+    return hdA.cache[k];
+  }
+  function hdSpeakFrom(index) {
+    hdUnlock();
+    if (synth && (synth.speaking || synth.pending)) synth.cancel();
+    var id = ++runId; clearTimers(); stopKeepAlive();
+    index = Math.max(0, Math.min(index, queue.length - 1));
+    state = "playing"; updateButtons(); hdMediaSession();
+    var a = hdA.audio;
+    if (hdA.index === index && hdA.key === hdKey(queue[index].say) && a.paused && a.currentTime > 0 && !a.ended) {
+      pos = index; highlight(index); hdWire(index, id);   // resume mid-sentence
+      var p = a.play(); if (p && p.catch) p.catch(function (e) { if (id === runId) hdBlocked(e); });
+      return;
+    }
+    hdPlay(index, id);
+  }
+  function hdPlay(i, id) {
+    if (id !== runId) return;
+    if (i >= queue.length) { finish(); return; }
+    pos = i; highlight(i);
+    var say = queue[i].say, p = hdGet(i);
+    hdGet(i + 1); hdGet(i + 2);                         // make the next sentences while this one plays
+    var slow = setTimeout(function () {
+      if (id === runId) $("#status").textContent = "✨ Warming up the storyteller voice…";
+    }, 700);
+    p.then(function (url) {
+      clearTimeout(slow);
+      if (id !== runId) return;
+      var a = hdA.audio;
+      hdA.index = i; hdA.key = hdKey(say);
+      a.src = url; hdWire(i, id); updateButtons();
+      var pr = a.play(); if (pr && pr.catch) pr.catch(function (e) { if (id === runId) hdBlocked(e); });
+    }, function (err) { clearTimeout(slow); if (id === runId) hdFail(err); });
+  }
+  function hdWire(i, id) {
+    var a = hdA.audio, item = queue[i];
+    a.onended = function () {
+      if (id !== runId) return;
+      var gap = Math.round(item.gap / Math.max(0.6, +$("#rate").value || 1));
+      if (document.hidden || !gap) hdPlay(i + 1, id);
+      else timers.gap = setTimeout(function () { hdPlay(i + 1, id); }, gap);
+    };
+    a.onerror = function () { if (id === runId && a.src) hdFail(new Error("audio playback error")); };
+  }
+  function hdBlocked(e) {                              // the browser wants one more tap before playing sound
+    if (e && e.name === "AbortError") return;
+    runId++; clearTimers(); hdHalt(); state = "paused"; updateButtons();
+    $("#status").textContent = "Tap ▶️ Keep listening to carry on.";
+  }
+  function hdHalt() {
+    if (!hdA.audio) return;
+    hdA.audio.onended = null; hdA.audio.onerror = null;
+    try { hdA.audio.pause(); } catch (e) {}
+  }
+  function hdReset() {
+    hdHalt(); hdA.index = -1; hdA.key = "";
+    Object.keys(hdA.cache).forEach(function (k) { hdA.cache[k].then(function (u) { URL.revokeObjectURL(u); }, function () {}); });
+    hdA.cache = {}; hdA.order = [];
+  }
+  function hdFail(err) {
+    if (window.console) console.warn("Storyteller voice failed:", err);
+    runId++; clearTimers(); hdHalt();
+    var missing = /missing:/.test(String(err && err.message));
+    if (missing) { hdList = []; refreshHdList(); }
+    else if (HD) HD.markFailed();
+    state = "paused"; loadVoices(); updateButtons();
+    $("#status").textContent = missing
+      ? "The storyteller voice files are gone from this device (storage was cleared). Using the device voice. Tap ▶️ Keep listening."
+      : "The storyteller voice couldn't run on this device, so we switched to the device voice. Tap ▶️ Keep listening.";
+  }
+  function hdTest() {
+    stopSpeech(); hdUnlock();
+    var id = ++runId, a = hdA.audio;
+    $("#status").textContent = "✨ Warming up the storyteller voice…";
+    HD.synth(HD_SAMPLE, hdLengthScale()).then(function (r) {
+      if (id !== runId) return;
+      a.onended = function () { if (id === runId) updateButtons(); }; a.onerror = null;
+      a.src = URL.createObjectURL(wavBlob(r.pcm, r.sampleRate));
+      $("#status").textContent = "🔈 Testing the storyteller voice…";
+      var p = a.play(); if (p && p.catch) p.catch(function () { updateButtons(); });
+    }, function (err) { if (id === runId) hdFail(err); });
+  }
+  function hdMediaSession() {
+    if (!("mediaSession" in navigator) || !current) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: current.title, artist: "Snuggle Stories",
+        artwork: [{ src: "icons/icon-512.png", sizes: "512x512", type: "image/png" }] });
+      navigator.mediaSession.setActionHandler("play", function () { if (state !== "playing") playPause(); });
+      navigator.mediaSession.setActionHandler("pause", function () { if (state === "playing") pauseSpeech(); });
+      navigator.mediaSession.setActionHandler("stop", function () { stopSpeech(); });
+    } catch (e) {}
+  }
+
+  function updateHdUi() {
+    var sup = hdSupported(), have = hdList.length > 0, on = isHd();
+    var card = $("#hd-card");
+    if (card) {
+      card.hidden = !sup || have || hdCrashed() || !!prefs.hdCardClosed;
+      var why = $("#hd-card-why");
+      if (why) why.textContent = IS_IOS && !IS_NATIVE ? "iPhone only lets web apps use its basic voices, which is why reading can sound robotic. " : "";
+    }
+    var pitch = $("#pitch");
+    if (pitch) { pitch.disabled = on; var pf = pitch.closest(".field"); if (pf) pf.classList.toggle("is-off", on); }
+    var pn = $("#pitch-note"); if (pn) pn.hidden = !on;
+    var ob = $("#hd-open");
+    if (ob) { ob.hidden = !HD; ob.textContent = have ? "🌟 Storyteller voices…" : "✨ Get the natural storyteller voice"; }
+    var cn = $("#hd-crash"); if (cn) cn.hidden = !hdCrashed() || !have;
+  }
+
+  // Grown-up panel: choose, download (with progress), switch off, or remove the storyteller voice.
+  var hdm = { voice: null, busy: false };
+  function mb(n) { return Math.round(n / 1048576) + " MB"; }
+  function openHd() {
+    if (!HD) return;
+    parentGate("Storyteller voice", function () { renderHd(); showModal("hdm"); });
+  }
+  function renderHd() {
+    var sup = HD.support(), box = $("#hdm-voices");
+    $("#hdm-unsupported").hidden = sup.ok;
+    if (!sup.ok) $("#hdm-unsupported").textContent = "😕 This device or browser can't run the storyteller voice (" + sup.reasons.join(", ") + "). Updating the device's software usually fixes this.";
+    $("#hdm-crash").hidden = !sup.crashed;
+    hdm.voice = hdm.voice || HD.currentVoice() || "kristin";
+    box.innerHTML = "";
+    HD.VOICES.forEach(function (v) {
+      var row = document.createElement("div"); row.className = "hd-voice";
+      var lab = document.createElement("label"); lab.className = "hd-pick";
+      var r = document.createElement("input"); r.type = "radio"; r.name = "hdv"; r.value = v.id; r.checked = v.id === hdm.voice;
+      r.addEventListener("change", function () { hdm.voice = v.id; renderHdActions(); });
+      var t = document.createElement("span");
+      t.innerHTML = "<strong></strong> <small></small>";
+      t.firstChild.textContent = v.name + (hdList.indexOf(v.id) >= 0 ? " ✓" : "");
+      t.lastChild.textContent = v.desc;
+      lab.appendChild(r); lab.appendChild(t);
+      var play = document.createElement("button"); play.type = "button"; play.className = "btn btn-small"; play.textContent = "▶️ Hear";
+      play.setAttribute("aria-label", "Hear " + v.name);
+      play.addEventListener("click", function () {
+        if (!hdm.sample) hdm.sample = new Audio();
+        hdm.sample.src = "hd/samples/" + v.id + ".m4a";
+        var p = hdm.sample.play(); if (p && p.catch) p.catch(function () { $("#hdm-msg").textContent = "Couldn't play the sample (are you offline?)."; });
+      });
+      row.appendChild(lab); row.appendChild(play); box.appendChild(row);
+    });
+    renderHdActions();
+  }
+  function renderHdActions() {
+    var sup = HD.support(), have = hdList.indexOf(hdm.voice) >= 0, get = $("#hdm-get"), name = "";
+    HD.VOICES.forEach(function (v) { if (v.id === hdm.voice) name = v.name; });
+    $("#hdm-manage").hidden = !hdList.length;
+    $("#hdm-on").checked = isHd();
+    get.disabled = !sup.ok || hdm.busy;
+    if (have) { get.textContent = sup.crashed ? "↻ Try " + name + " again" : (isHd() && HD.currentVoice() === hdm.voice ? "✓ Using " + name : "Use " + name); return; }
+    get.textContent = "⬇️ Download " + name;
+    HD.sizeOf(hdm.voice, true).then(function (n) {
+      if (!hdm.busy && hdList.indexOf(hdm.voice) < 0) get.textContent = "⬇️ Download " + name + " (" + mb(n) + ", one time)";
+    }, function () {});
+  }
+  function useHd(id) {
+    HD.setVoice(id); HD.setEnabled(true); HD.clearCrash();
+    prefs.voice = "hd:" + id; savePrefs();
+    stopSpeech(); loadVoices(); updateVoiceTip();
+  }
+  function hdGetClick() {
+    var id = hdm.voice;
+    if (hdList.indexOf(id) >= 0) { useHd(id); renderHd(); $("#hdm-msg").textContent = "🌟 Done! Stories will be read by the storyteller voice."; return; }
+    hdm.busy = true; renderHdActions();
+    $("#hdm-progress").hidden = false; $("#hdm-bar").style.width = "0%";
+    $("#hdm-msg").textContent = "Downloading… you can keep using the app.";
+    HD.download(id, function (got, total) {
+      var pc = total ? Math.floor(100 * got / total) : 0;
+      $("#hdm-bar").style.width = pc + "%"; $("#hdm-pct").textContent = pc + "% · " + mb(got) + " of " + mb(total);
+    }).then(function () {
+      hdm.busy = false;
+      $("#hdm-msg").textContent = "✨ Getting the voice ready…";
+      return refreshHdList().then(function () {
+        useHd(id);
+        return HD.load(id);
+      }).then(function () {
+        $("#hdm-progress").hidden = true; renderHd();
+        $("#hdm-msg").textContent = "🌟 Ready! Stories will now be read by the storyteller voice, even offline.";
+      });
+    }).catch(function (err) {
+      hdm.busy = false; renderHdActions();
+      $("#hdm-msg").textContent = "😕 " + (navigator.onLine === false ? "You're offline. Connect to Wi‑Fi and try again." : (err && err.message) || "Something went wrong. Please try again.");
+    });
+  }
+  function initHd() {
+    if (!HD) return;
+    $("#hdm-get").addEventListener("click", hdGetClick);
+    $("#hdm-on").addEventListener("change", function () {
+      HD.setEnabled(this.checked);
+      if (this.checked) { HD.clearCrash(); prefs.voice = "hd:" + (HD.currentVoice() || hdList[0]); }
+      else { delete prefs.voice; prefs.voice = voices[0] ? voiceKey(voices[0]) : undefined; }
+      savePrefs(); stopSpeech(); loadVoices(); updateVoiceTip(); renderHdActions();
+    });
+    $("#hdm-remove").addEventListener("click", function () {
+      if (!confirm("Remove the downloaded storyteller voices from this device? You can download them again any time.")) return;
+      stopSpeech(); hdReset();
+      HD.remove().then(function () { delete prefs.voice; savePrefs(); hdList = []; loadVoices(); updateVoiceTip(); renderHd(); $("#hdm-msg").textContent = "Removed."; });
+    });
+    ["#hd-get", "#hd-open", "#voice-tip-hd", "#gp-hd", "#hd-crash-btn"].forEach(function (sel) {
+      var b = $(sel); if (b) b.addEventListener("click", function () { if (sel === "#gp-hd") { renderHd(); showModal("hdm"); } else openHd(); });
+    });
+    var x = $("#hd-card-x");
+    if (x) x.addEventListener("click", function () { prefs.hdCardClosed = prefs.voiceTipClosed = true; savePrefs(); updateHdUi(); updateVoiceTip(); });
+    var vc = $("#gp-voicecheck"); if (vc) vc.addEventListener("click", openVoiceCheck);
+    refreshHdList();
+    if (/[?&]voicedebug=1\b/.test(location.search)) setTimeout(openVoiceCheck, 1500);
+  }
+
+  /* ---------------- Voice check (?voicedebug=1, or Grown-ups › Voice check) ----------------
+     Lists exactly what this device's browser offers, so a grown-up can copy it and send it to us. */
+  function voiceReport() {
+    var all = synth ? (synth.getVoices() || []) : [], sel = $("#voice"), sv = selectedVoice(), sup = HD ? HD.support() : null;
+    var standalone = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+    var L = [];
+    L.push("Snuggle Stories voice check · " + new Date().toString());
+    L.push("Device: " + navigator.userAgent);
+    L.push("Mode: " + (IS_NATIVE ? "store app" : standalone ? "Home Screen app" : "browser tab") + " · language " + navigator.language);
+    L.push("Using now: " + (isHd() ? "storyteller voice " + sel.value.slice(3) : sv ? sv.name + " (" + sv.lang + ")" : "none"));
+    L.push("Storyteller voice: " + (!HD ? "not loaded" : (sup.ok ? "can run" : "can't run: " + sup.reasons.join(", ")) +
+      (sup.crashed ? " · crashed last time" : "") + " · downloaded: " + (hdList.join(", ") || "none")));
+    if (hdStats.length) {
+      var t = hdStats.reduce(function (s, x) { return { ms: s.ms + x.ms, a: s.a + x.audioMs }; }, { ms: 0, a: 0 });
+      L.push("Storyteller speed: " + hdStats.length + " sentences, avg " + Math.round(t.ms / hdStats.length) + " ms to make, " + (t.a / t.ms).toFixed(1) + "× faster than real time");
+    }
+    L.push("Memory: " + (navigator.deviceMemory ? navigator.deviceMemory + " GB" : "unknown") + " · cores " + (navigator.hardwareConcurrency || "?") +
+      " · WebGPU " + (navigator.gpu ? "yes" : "no") + " · audioSession " + (navigator.audioSession ? "yes" : "no"));
+    L.push("");
+    L.push("Web Speech voices (" + all.length + "):  [name | lang | local | default | voiceURI]");
+    all.forEach(function (v, i) {
+      L.push((i + 1) + ". " + v.name + " | " + v.lang + " | " + (v.localService ? "local" : "online") + " | " + (v["default"] ? "default" : "-") + " | " + v.voiceURI +
+        (sv && v === sv ? "   ← picked" : "") + "   (quality " + voiceQuality(v) + ")");
+    });
+    if (!all.length) L.push("(none reported)");
+    return L.join("\n");
+  }
+  function openVoiceCheck() {
+    var out = $("#vdbg-out");
+    out.textContent = voiceReport();
+    $("#vdbg-msg").textContent = "";
+    showModal("vdbg");
+    if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) {
+      var p = navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(null);
+      return p.then(function (per) { out.textContent += "\n\nStorage: " + mb(e.usage || 0) + " used of " + mb(e.quota || 0) + (per === null ? "" : per ? " · kept (persistent)" : " · may be cleared by the system"); });
+    }).catch(function () {});
+  }
+  function copyVoiceCheck() {
+    var text = $("#vdbg-out").textContent, done = function () { $("#vdbg-msg").textContent = "✅ Copied. Paste it into a message to us."; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
+    function fallback() {
+      var ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+      try { document.execCommand("copy"); done(); } catch (e) { $("#vdbg-msg").textContent = "Select the text above and copy it."; }
+      ta.remove();
+    }
+  }
+  document.addEventListener("click", function (e) { if (e.target && e.target.id === "vdbg-copy") copyVoiceCheck(); });
 
   /* ---------------- Rate / pitch ---------------- */
   function clamp(x, lo, hi) { x = +x; if (!isFinite(x)) x = 1; return Math.min(hi, Math.max(lo, x)); }
@@ -1393,6 +1738,7 @@
 
   // NOTE: must stay synchronous from the click handler to the first synth.speak() (iOS requires it).
   function speakFrom(index) {
+    if (isHd() && queue.length) { hdSpeakFrom(index); return; }
     if (!synth || !queue.length) return;
     var id = ++runId;
     clearTimers();
@@ -1466,10 +1812,10 @@
   // (Native pause/resume is unreliable on iOS and Android, so this works the same everywhere.)
   function pauseSpeech() {
     if (state !== "playing") return;
-    runId++; clearTimers(); stopKeepAlive(); synth.cancel(); state = "paused"; updateButtons();
+    runId++; clearTimers(); stopKeepAlive(); if (synth) synth.cancel(); hdHalt(); state = "paused"; updateButtons();
   }
   function playPause() {
-    if (!synth) return;
+    if (!synth && !isHd()) return;
     if (state === "playing") pauseSpeech();
     else speakFrom(state === "paused" ? pos : 0);
   }
@@ -1477,6 +1823,7 @@
   function stopSpeech() {
     runId++; clearTimers(); stopKeepAlive();
     if (synth) synth.cancel();
+    hdHalt(); hdA.index = -1;
     state = "idle"; pos = 0; clearHighlight(); updateButtons();
   }
 
@@ -1511,7 +1858,7 @@
     $("#mini").hidden = state === "idle";
     $("#mini-play").innerHTML = state === "playing" ? "⏸️ Pause" : "▶️ Play";
     $("#mini-label").textContent = state === "playing" ? "🎧 Reading…" : "⏸️ Paused";
-    $("#status").textContent = !synth ? "" : state === "playing" ? "Reading aloud… tap any paragraph to jump there."
+    $("#status").textContent = !synth && !isHd() ? "" : state === "playing" ? "Reading aloud… tap any paragraph to jump there."
       : state === "paused" ? "Paused. Press Keep listening to carry on." : "Press Listen to hear the story.";
   }
 
@@ -1566,8 +1913,15 @@
       $("#" + id).addEventListener("input", showVals);
       $("#" + id).addEventListener("change", function () { prefs[id] = $("#" + id).value; savePrefs(); restartIfPlaying(); });
     });
-    $("#voice").addEventListener("change", function () { prefs.voice = $("#voice").value; savePrefs(); restartIfPlaying(); });
+    $("#voice").addEventListener("change", function () {
+      var v = $("#voice").value;
+      prefs.voice = v; savePrefs();
+      if (/^hd:/.test(v)) { HD.setVoice(v.slice(3)); HD.setEnabled(true); }
+      updateHdUi(); updateVoiceTip(); restartIfPlaying();
+    });
+    initHd();
     $("#test-voice").addEventListener("click", function () {
+      if (isHd()) { hdTest(); return; }
       if (!synth) return;
       stopSpeech();   // synchronous → speak stays inside the tap (iOS)
       synth.speak(utter("Once upon a time, a sleepy little star yawned and said goodnight. Are you ready for a story?"));
@@ -1576,9 +1930,14 @@
     if (tipX) tipX.addEventListener("click", function () { prefs.voiceTipClosed = true; savePrefs(); $("#voice-tip").hidden = true; });
 
     if (!synth || typeof window.SpeechSynthesisUtterance === "undefined") {
+      synth = null;
       $("#no-tts").hidden = false;
       $("#play").disabled = true; $("#test-voice").disabled = true;
       $("#voice-field").hidden = true;
+      onHdList(function () {        // a downloaded storyteller voice works even without the browser's speech
+        if (!isHd()) return;
+        $("#no-tts").hidden = true; $("#play").disabled = false; $("#test-voice").disabled = false;
+      });
     } else {
       loadVoices();
       if (typeof synth.addEventListener === "function") synth.addEventListener("voiceschanged", loadVoices);
@@ -1591,7 +1950,7 @@
       // pause cleanly so "Keep listening" resumes from the same sentence. Desktop keeps reading.
       document.addEventListener("visibilitychange", function () {
         if (document.hidden) { if (state === "playing" && IS_MOBILE && !IS_NATIVE) pauseSpeech(); }
-        else if (state === "playing" && !synth.speaking && !synth.pending) speakFrom(pos);   // stuck after returning
+        else if (state === "playing" && !isHd() && !synth.speaking && !synth.pending) speakFrom(pos);   // stuck after returning
       });
       document.addEventListener("keydown", function (e) { // space bar = play/pause when not typing
         if (e.code === "Space" && current && !/INPUT|SELECT|TEXTAREA|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); playPause(); }

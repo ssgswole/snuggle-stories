@@ -1,0 +1,58 @@
+{
+ "version": 1,
+ "common": [
+  {
+   "path": "ort-wasm-simd-threaded.wasm",
+   "size": 14239897,
+   "type": "application/wasm"
+  },
+  {
+   "path": "lexicon.txt",
+   "size": 2844654,
+   "type": "text/plain"
+  },
+  {
+   "path": "context.json",
+   "size": 57169,
+   "type": "application/json"
+  }
+ ],
+ "voices": {
+  "kristin": [
+   {
+    "path": "voices/kristin.onnx",
+    "size": 32365722,
+    "type": "application/octet-stream"
+   },
+   {
+    "path": "voices/kristin.json",
+    "size": 2075,
+    "type": "application/json"
+   }
+  ],
+  "norman": [
+   {
+    "path": "voices/norman.onnx",
+    "size": 32365722,
+    "type": "application/octet-stream"
+   },
+   {
+    "path": "voices/norman.json",
+    "size": 2075,
+    "type": "application/json"
+   }
+  ],
+  "cori": [
+   {
+    "path": "voices/cori.onnx",
+    "size": 32365722,
+    "type": "application/octet-stream"
+   },
+   {
+    "path": "voices/cori.json",
+    "size": 2075,
+    "type": "application/json"
+   }
+  ]
+ }
+}

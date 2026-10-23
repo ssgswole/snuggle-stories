@@ -419,3 +419,23 @@ body.screen-open { overflow: hidden; }
 .pl-controls { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; }
 .pl-play { min-width: 112px; white-space: nowrap; }
 .pl-controls input[type=range] { min-width: 0; width: 100%; }
+
+/* ✨ Storyteller voice (HD) */
+.hd-card { position: relative; background: #fff7e6; border: 2px solid #ffd58a; border-radius: 16px; padding: 12px 44px 12px 14px; margin: 10px 0; }
+.hd-card .btn { margin-top: 8px; }
+.voice-tip .btn { margin-top: 8px; }
+.hd-voices { display: grid; gap: 8px; margin: 10px 0; text-align: left; }
+.hd-voice { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 2px solid #eadff7; border-radius: 14px; padding: 8px 10px; }
+.hd-pick { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1; }
+.hd-pick input { width: 22px; height: 22px; }
+.hd-pick small { display: block; opacity: .8; }
+.hd-progress { margin: 8px 0; }
+.hd-bar { height: 14px; background: #eee6f7; border-radius: 99px; overflow: hidden; }
+.hd-bar span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #8f6ce0, #ff9db5); transition: width .2s; }
+.hd-pct { margin: 4px 0 0; font-size: .9em; opacity: .85; text-align: center; }
+.field.is-off input[type=range] { opacity: .45; }
+.pitch-note { display: block; opacity: .8; margin-top: 2px; }
+#hd-open { margin: 4px 0 6px; }
+.modal-wide { max-width: 760px; }
+.vdbg-out { max-height: 45vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.4; background: #f6f3fb; border-radius: 12px; padding: 10px; text-align: left; user-select: text; -webkit-user-select: text; }
+@media print { .hd-card { display: none !important; } }

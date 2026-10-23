@@ -1,0 +1,11 @@
+Snuggle Stories storyteller voice: third-party components
+
+ONNX Runtime Web 1.30.0 (ort.wasm.bundle.min.mjs, ort-wasm-simd-threaded.wasm)
+  MIT License, Copyright (c) Microsoft Corporation. https://github.com/microsoft/onnxruntime
+
+Piper voices (voices/*.onnx, voices/*.json), from https://huggingface.co/rhasspy/piper-voices (MIT)
+  kristin = en_US-kristin-medium, norman = en_US-norman-medium, cori = en_GB-cori-medium
+  Training data: LibriVox recordings (public domain). Weights re-stored as float16 (no other changes).
+
+lexicon.txt / context.json: pronunciations generated with espeak-ng (program output; no espeak-ng code is
+  included) for words from the CMU Pronouncing Dictionary (BSD-2-Clause), US baby-name lists and the story templates.
