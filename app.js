@@ -1330,9 +1330,9 @@
   // Grown-up tip when this device only has basic (robotic-sounding) voices.
   // (Apple renamed Accessibility › "Spoken Content" to "Read & Speak" in iOS 26 / macOS 26.)
   function voiceHelpText() {
-    var hd = hdSupported() ? " The ✨ storyteller voice is the easy fix: free, natural, one download, and it works offline." : "";
+    var hd = hdSupported() ? " Tap Listen and we'll download a free natural storyteller voice once (about 47 MB); after that it works offline." : "";
     if (IS_IOS && !IS_NATIVE) return "On iPhone and iPad, Apple only lets websites and Home Screen apps use its basic built-in voices. The Enhanced and Premium voices in Settings can't be used here, so downloading them won't change this app." + hd;
-    if (IS_IOS) return "In Settings › Accessibility › Read & Speak (called Spoken Content before iOS 26) › Voices › English › Voice, tap the download button next to an Enhanced or Premium voice (Ava, Zoe or Evan sound lovely). Then reopen Snuggle Stories and pick it here. Siri voices can't be used by apps." + hd;
+    if (IS_IOS) return "For the warmest reading, tap Listen — we'll install the free storyteller voice once." + (hd ? "" : " Or in Settings › Accessibility › Read & Speak › Voices › English, download an Enhanced or Premium voice (Ava, Zoe, Evan), then reopen the app and pick it here.");
     if (IS_MAC && IS_APPLE_WEBKIT) return "Safari only lets websites use the Mac's basic built-in voices, not the Enhanced or Premium voices you can download in System Settings." + hd;
     if (IS_MAC) return "On a Mac: System Settings › Accessibility › Read & Speak (called Spoken Content before macOS 26), click ⓘ next to System voice › Voice, and download an Enhanced or Premium English voice. Then reload this page and pick it here." + hd;
     if (IS_ANDROID) return "On Android: Settings › Accessibility › Text-to-speech output (Samsung: Settings › General management › Text-to-speech). Choose Google's “Speech Recognition & Synthesis” engine (older phones: “Speech Services by Google”), tap ⚙️ next to it › Install voice data › English (United States), and download a voice. Then reopen Snuggle Stories." + hd;
@@ -1542,7 +1542,7 @@
     if (card) {
       card.hidden = !sup || have || hdCrashed() || !!prefs.hdCardClosed;
       var why = $("#hd-card-why");
-      if (why) why.textContent = IS_IOS && !IS_NATIVE ? "iPhone only lets web apps use its basic voices, which is why reading can sound robotic. " : "";
+      if (why) why.textContent = "Tap Listen and we'll download a free natural storyteller voice once (about 47 MB), then stories sound warm offline. ";
     }
     var pitch = $("#pitch");
     if (pitch) { pitch.disabled = on; var pf = pitch.closest(".field"); if (pf) pf.classList.toggle("is-off", on); }
@@ -1736,9 +1736,16 @@
   }
   function stopKeepAlive() { if (keepAlive) clearInterval(keepAlive); keepAlive = null; }
 
-  // NOTE: must stay synchronous from the click handler to the first synth.speak() (iOS requires it).
-  function speakFrom(index) {
-    if (isHd() && queue.length) { hdSpeakFrom(index); return; }
+  // Prefer the natural storyteller voice whenever it can run. Download Kristin once (about 47 MB)
+  // automatically on Listen so grown-ups don't have to dig through settings. Device/robotic TTS is
+  // only used if HD can't run, download fails, or a grown-up turned storyteller voices off.
+  var hdEnsuring = false;
+  function wantNaturalHd() {
+    if (!HD || !hdSupported() || hdCrashed()) return false;
+    try { if (localStorage.getItem("snuggle.hdOff") === "1") return false; } catch (e) {}
+    return true;
+  }
+  function speakFromDevice(index) {
     if (!synth || !queue.length) return;
     var id = ++runId;
     clearTimers();
@@ -1746,6 +1753,38 @@
     if (synth.paused && synth.resume) synth.resume();
     state = "playing"; updateButtons(); startKeepAlive();
     speakChunk(Math.max(0, Math.min(index, queue.length - 1)), id, 0);
+  }
+  // NOTE: hdUnlock() must stay synchronous from the click handler (iOS audio unlock).
+  function speakFrom(index) {
+    if (isHd() && queue.length) { hdSpeakFrom(index); return; }
+    if (!wantNaturalHd() || !queue.length) { speakFromDevice(index); return; }
+    var want = (HD.currentVoice() && hdList.indexOf(HD.currentVoice()) >= 0) ? HD.currentVoice()
+      : (hdList[0] || "kristin");
+    hdUnlock();                                           // same tap as Listen
+    if (hdList.indexOf(want) >= 0) { useHd(want); hdSpeakFrom(index); return; }
+    if (hdEnsuring) return;
+    hdEnsuring = true;
+    if (synth && (synth.speaking || synth.pending)) synth.cancel();
+    state = "paused"; updateButtons();
+    $("#status").textContent = "✨ Downloading the natural storyteller voice (one time, about 47 MB)…";
+    HD.download(want, function (got, total) {
+      var pc = total ? Math.floor(100 * got / total) : 0;
+      $("#status").textContent = "✨ Downloading storyteller voice… " + pc + "% · " + mb(got) + " of " + mb(total);
+    }).then(function () {
+      return refreshHdList().then(function () { return HD.load(want); });
+    }).then(function () {
+      hdEnsuring = false;
+      useHd(want);
+      $("#status").textContent = "✨ Storyteller voice ready…";
+      if (queue.length) hdSpeakFrom(index);
+    }).catch(function (err) {
+      hdEnsuring = false;
+      if (window.console) console.warn("Storyteller download failed:", err);
+      $("#status").textContent = navigator.onLine === false
+        ? "You're offline — connect to Wi‑Fi to download the storyteller voice. Using the device voice for now."
+        : "Couldn't download the storyteller voice (" + ((err && err.message) || "error") + "). Using the device voice.";
+      speakFromDevice(index);
+    });
   }
 
   function speakChunk(i, id, attempt) {
@@ -1815,7 +1854,7 @@
     runId++; clearTimers(); stopKeepAlive(); if (synth) synth.cancel(); hdHalt(); state = "paused"; updateButtons();
   }
   function playPause() {
-    if (!synth && !isHd()) return;
+    if (!synth && !isHd() && !wantNaturalHd()) return;
     if (state === "playing") pauseSpeech();
     else speakFrom(state === "paused" ? pos : 0);
   }
